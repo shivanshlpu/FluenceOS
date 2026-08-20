@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build Outputs
+frontend/dist/
+dist/
+build/
+target/
+*.class
+*.jar
+*.war
+
+# Environment Variables & Secrets
+.env
+backend-python/.env
+frontend/.env
+*.local
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# Large Archives
+maven.zip
+*.zip
+*.tar.gz
