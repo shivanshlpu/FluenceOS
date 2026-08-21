@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../../store/authStore';
 import useNotificationStore from '../../store/notificationStore';
 import { useNewsPoller } from '../../hooks/useNewsPoller';
-import { Search, ChevronLeft, ChevronRight, Bell, Newspaper, CheckCheck, Trash2, X, RefreshCw, LogOut, ShieldCheck } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, Bell, Newspaper, CheckCheck, Trash2, X, RefreshCw, LogOut } from 'lucide-react';
 
 function timeAgo(iso) {
     const diff = (Date.now() - new Date(iso)) / 1000;
@@ -101,103 +101,68 @@ export default function Navbar() {
     }, []);
 
     return (
-        <nav style={{
-            position: 'sticky', top: 0, zIndex: 10, height: '64px',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '0 16px',
-            background: scrolled ? 'rgba(18,18,18,0.95)' : 'transparent',
-            backdropFilter: scrolled ? 'blur(20px)' : 'none',
-            transition: 'background var(--transition-normal)',
-        }}>
-            {/* Left: Nav arrows + Search */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <button onClick={() => navigate(-1)} style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(0,0,0,0.6)', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}>
+        <nav className="app-nav-header">
+            {/* Left: Desktop Nav Arrows + Search Input */}
+            <div className="nav-left-section">
+                {/* Back / Forward arrows (Hidden on mobile via CSS) */}
+                <button
+                    onClick={() => navigate(-1)}
+                    className="nav-arrow-btn desktop-only"
+                    title="Go back"
+                >
                     <ChevronLeft size={18} />
                 </button>
-                <button onClick={() => navigate(1)} style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(0,0,0,0.6)', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' }}>
+                <button
+                    onClick={() => navigate(1)}
+                    className="nav-arrow-btn desktop-only"
+                    title="Go forward"
+                >
                     <ChevronRight size={18} />
                 </button>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-pill)', padding: '8px 14px', width: '220px', border: '1px solid var(--border-subtle)' }}>
-                    <Search size={15} color="var(--text-muted)" />
-                    <input placeholder="What do you want to learn?" style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: '13px', width: '100%', fontFamily: "'Figtree', sans-serif" }} />
+
+                {/* Search Bar (Expands smoothly on mobile) */}
+                <div className="nav-search-box">
+                    <Search size={15} color="var(--text-muted)" className="search-icon" />
+                    <input
+                        placeholder="What do you want to learn?"
+                        className="nav-search-input"
+                    />
                 </div>
             </div>
 
-            {/* Right: Clear Cache + PWA Install + Bell + User */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                
+            {/* Right: Clear Cache + PWA Install + Bell + User Avatar */}
+            <div className="nav-right-section">
                 {/* 1-Click Clear Cache & Force Update Button */}
                 <button
                     type="button"
                     onClick={handleClearAppCache}
                     title="Clear cache & reload latest update"
                     disabled={clearingCache}
-                    style={{
-                        background: 'rgba(139, 92, 246, 0.15)',
-                        border: '1px solid #8b5cf6',
-                        color: '#c4b5fd',
-                        padding: '6px 10px',
-                        borderRadius: '20px',
-                        fontSize: '11.5px',
-                        fontWeight: 600,
-                        cursor: clearingCache ? 'not-allowed' : 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '5px',
-                        transition: 'all 0.2s',
-                        whiteSpace: 'nowrap'
-                    }}
+                    className="btn-clear-cache"
                 >
                     <RefreshCw size={13} className={clearingCache ? 'animate-spin' : ''} />
-                    <span>{clearingCache ? 'Updating...' : 'Clear Cache'}</span>
+                    <span className="cache-btn-text">{clearingCache ? '...' : 'Clear Cache'}</span>
                 </button>
 
-                {/* PWA Install Button */}
+                {/* PWA Install Button (Desktop/Supported) */}
                 {deferredPrompt && (
                     <button 
                         onClick={handleInstallClick}
-                        style={{
-                            background: 'var(--accent)',
-                            color: '#fff',
-                            border: 'none',
-                            padding: '6px 12px',
-                            borderRadius: 'var(--radius-pill)',
-                            fontSize: '12px',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '5px',
-                            transition: 'all 0.2s',
-                            boxShadow: '0 4px 12px rgba(30, 215, 96, 0.2)'
-                        }}
+                        className="btn-pwa-install desktop-only"
                     >
                         <span>📲</span> Install
                     </button>
                 )}
 
-                {/* Bell Button */}
+                {/* Bell Notification Button */}
                 <div ref={panelRef} style={{ position: 'relative' }}>
                     <button
                         onClick={() => { setNotifOpen(v => !v); if (!notifOpen && unreadCount > 0) markAllRead(); }}
-                        style={{
-                            width: '34px', height: '34px', borderRadius: '50%', position: 'relative',
-                            background: notifOpen ? 'var(--bg-elevated-2)' : 'transparent',
-                            color: unreadCount > 0 ? 'var(--accent)' : 'var(--text-secondary)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            border: 'none', cursor: 'pointer',
-                            transition: 'all var(--transition-fast)',
-                        }}
+                        className={`btn-icon-nav ${notifOpen ? 'active' : ''}`}
                     >
                         <Bell size={17} />
                         {unreadCount > 0 && (
-                            <span style={{
-                                position: 'absolute', top: '2px', right: '2px',
-                                width: '15px', height: '15px', borderRadius: '50%',
-                                background: '#ef4444', color: '#fff',
-                                fontSize: '9px', fontWeight: 900,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            }}>
+                            <span className="unread-badge">
                                 {unreadCount > 9 ? '9+' : unreadCount}
                             </span>
                         )}
@@ -205,18 +170,8 @@ export default function Navbar() {
 
                     {/* Notification Dropdown Panel */}
                     {notifOpen && (
-                        <div style={{
-                            position: 'absolute', top: '44px', right: 0,
-                            width: '320px', maxHeight: '440px',
-                            background: 'var(--bg-elevated-1)',
-                            borderRadius: 'var(--radius-md)',
-                            boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
-                            border: '1px solid var(--border-subtle)',
-                            overflow: 'hidden',
-                            display: 'flex', flexDirection: 'column',
-                            zIndex: 100,
-                        }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderBottom: '1px solid var(--border-subtle)' }}>
+                        <div className="notif-dropdown-panel">
+                            <div className="notif-header">
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                     <Bell size={14} color="var(--text-secondary)" />
                                     <span style={{ fontWeight: 700, fontSize: '13px' }}>Notifications</span>
@@ -224,15 +179,15 @@ export default function Navbar() {
                                 <div style={{ display: 'flex', gap: '4px' }}>
                                     {notifications.length > 0 && (
                                         <>
-                                            <button onClick={markAllRead} title="Mark all read" style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'transparent', color: 'var(--text-muted)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CheckCheck size={13} /></button>
-                                            <button onClick={clearAll} title="Clear all" style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'transparent', color: 'var(--text-muted)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={12} /></button>
+                                            <button onClick={markAllRead} title="Mark all read" className="btn-icon-subtle"><CheckCheck size={13} /></button>
+                                            <button onClick={clearAll} title="Clear all" className="btn-icon-subtle"><Trash2 size={12} /></button>
                                         </>
                                     )}
-                                    <button onClick={() => setNotifOpen(false)} style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'transparent', color: 'var(--text-muted)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={13} /></button>
+                                    <button onClick={() => setNotifOpen(false)} className="btn-icon-subtle"><X size={13} /></button>
                                 </div>
                             </div>
 
-                            <div style={{ overflowY: 'auto', flex: 1 }}>
+                            <div style={{ overflowY: 'auto', flex: 1, maxHeight: '360px' }}>
                                 {notifications.length === 0 ? (
                                     <div style={{ padding: '30px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>
                                         <p style={{ fontSize: '12px', margin: 0 }}>No new notifications</p>
@@ -260,29 +215,17 @@ export default function Navbar() {
                     )}
                 </div>
 
-                {/* User avatar & dropdown menu */}
+                {/* User Avatar & Dropdown Menu */}
                 <div ref={userMenuRef} style={{ position: 'relative' }}>
                     <button
                         onClick={() => setUserMenuOpen(v => !v)}
-                        style={{
-                            width: '32px', height: '32px', borderRadius: '50%',
-                            background: '#8b5cf6', color: '#fff', fontSize: '13px',
-                            fontWeight: 700, display: 'flex', alignItems: 'center',
-                            justifyContent: 'center', border: 'none', cursor: 'pointer'
-                        }}
+                        className="btn-user-avatar"
                     >
                         {(user?.name || user?.email || 'U')[0].toUpperCase()}
                     </button>
 
                     {userMenuOpen && (
-                        <div style={{
-                            position: 'absolute', top: '44px', right: 0,
-                            width: '200px', background: '#181528',
-                            borderRadius: '12px', border: '1px solid #2d264a',
-                            boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
-                            padding: '8px', zIndex: 100,
-                            display: 'flex', flexDirection: 'column', gap: '4px'
-                        }}>
+                        <div className="user-dropdown-panel">
                             <div style={{ padding: '6px 8px', borderBottom: '1px solid #282142', marginBottom: '4px' }}>
                                 <div style={{ fontSize: '12px', fontWeight: 700, color: '#fff' }}>{user?.name || 'Fluence User'}</div>
                                 <div style={{ fontSize: '11px', color: '#a5a0c2', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user?.email || 'Active Session'}</div>
@@ -290,13 +233,7 @@ export default function Navbar() {
 
                             <button
                                 onClick={handleClearAppCache}
-                                style={{
-                                    display: 'flex', alignItems: 'center', gap: '8px',
-                                    padding: '8px 10px', borderRadius: '8px',
-                                    background: 'transparent', border: 'none',
-                                    color: '#c4b5fd', fontSize: '12px', fontWeight: 600,
-                                    cursor: 'pointer', width: '100%', textAlign: 'left'
-                                }}
+                                className="dropdown-action-btn"
                             >
                                 <RefreshCw size={13} />
                                 Force Update & Clear Cache
@@ -304,13 +241,7 @@ export default function Navbar() {
 
                             <button
                                 onClick={() => { logout(); navigate('/auth'); }}
-                                style={{
-                                    display: 'flex', alignItems: 'center', gap: '8px',
-                                    padding: '8px 10px', borderRadius: '8px',
-                                    background: 'transparent', border: 'none',
-                                    color: '#ef4444', fontSize: '12px', fontWeight: 600,
-                                    cursor: 'pointer', width: '100%', textAlign: 'left'
-                                }}
+                                className="dropdown-action-btn logout"
                             >
                                 <LogOut size={13} />
                                 Sign Out
@@ -319,6 +250,265 @@ export default function Navbar() {
                     )}
                 </div>
             </div>
+
+            {/* Embedded Responsive Stylesheet for Header */}
+            <style>{`
+                .app-nav-header {
+                    position: sticky;
+                    top: 0;
+                    z-index: 100;
+                    height: 60px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    padding: 0 16px;
+                    background: rgba(18, 18, 18, 0.95);
+                    backdrop-filter: blur(20px);
+                    box-sizing: border-box;
+                    width: 100%;
+                    gap: 10px;
+                }
+
+                .nav-left-section {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    flex: 1;
+                    min-width: 0;
+                }
+
+                .nav-arrow-btn {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 50%;
+                    background: rgba(0, 0, 0, 0.6);
+                    color: var(--text-primary);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    border: none;
+                    cursor: pointer;
+                    flex-shrink: 0;
+                }
+
+                .nav-search-box {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    background: var(--bg-surface, #1e1b2e);
+                    border-radius: 20px;
+                    padding: 8px 12px;
+                    border: 1px solid var(--border-subtle, #2d264a);
+                    flex: 1;
+                    max-width: 320px;
+                    min-width: 0;
+                    box-sizing: border-box;
+                }
+
+                .nav-search-input {
+                    background: transparent;
+                    border: none;
+                    outline: none;
+                    color: #fff;
+                    font-size: 13px;
+                    width: 100%;
+                    min-width: 0;
+                    font-family: inherit;
+                }
+
+                .nav-right-section {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    flex-shrink: 0;
+                }
+
+                .btn-clear-cache {
+                    background: rgba(139, 92, 246, 0.18);
+                    border: 1px solid #8b5cf6;
+                    color: #c4b5fd;
+                    padding: 6px 10px;
+                    border-radius: 20px;
+                    font-size: 11.5px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    gap: 5px;
+                    white-space: nowrap;
+                    flex-shrink: 0;
+                }
+
+                .btn-pwa-install {
+                    background: var(--accent, #10b981);
+                    color: #fff;
+                    border: none;
+                    padding: 6px 12px;
+                    border-radius: 20px;
+                    font-size: 12px;
+                    font-weight: 700;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    gap: 5px;
+                    white-space: nowrap;
+                }
+
+                .btn-icon-nav {
+                    width: 34px;
+                    height: 34px;
+                    border-radius: 50%;
+                    background: transparent;
+                    color: #a8a2c8;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    border: none;
+                    cursor: pointer;
+                    position: relative;
+                    flex-shrink: 0;
+                }
+                .btn-icon-nav.active {
+                    background: #251f38;
+                    color: #fff;
+                }
+
+                .unread-badge {
+                    position: absolute;
+                    top: 2px;
+                    right: 2px;
+                    width: 15px;
+                    height: 15px;
+                    border-radius: 50%;
+                    background: #ef4444;
+                    color: #fff;
+                    font-size: 9px;
+                    font-weight: 900;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+
+                .btn-user-avatar {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 50%;
+                    background: #8b5cf6;
+                    color: #fff;
+                    font-size: 13px;
+                    font-weight: 700;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    border: none;
+                    cursor: pointer;
+                    flex-shrink: 0;
+                }
+
+                .notif-dropdown-panel {
+                    position: absolute;
+                    top: 44px;
+                    right: 0;
+                    width: 320px;
+                    max-height: 440px;
+                    background: #181528;
+                    border-radius: 12px;
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+                    border: 1px solid #2d264a;
+                    overflow: hidden;
+                    display: flex;
+                    flex-direction: column;
+                    z-index: 200;
+                }
+
+                .notif-header {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    padding: 12px 14px;
+                    border-bottom: 1px solid #282142;
+                }
+
+                .btn-icon-subtle {
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 50%;
+                    background: transparent;
+                    color: #a5a0c2;
+                    border: none;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+
+                .user-dropdown-panel {
+                    position: absolute;
+                    top: 44px;
+                    right: 0;
+                    width: 200px;
+                    background: #181528;
+                    border-radius: 12px;
+                    border: 1px solid #2d264a;
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+                    padding: 8px;
+                    z-index: 200;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 4px;
+                }
+
+                .dropdown-action-btn {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 8px 10px;
+                    border-radius: 8px;
+                    background: transparent;
+                    border: none;
+                    color: #c4b5fd;
+                    font-size: 12px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    width: 100%;
+                    text-align: left;
+                }
+                .dropdown-action-btn.logout {
+                    color: #ef4444;
+                }
+
+                /* Mobile View Rules: Remove Back/Forward arrows, maximize search & fit right-side buttons */
+                @media (max-width: 768px) {
+                    .app-nav-header {
+                        padding: 0 10px;
+                        gap: 8px;
+                    }
+                    .desktop-only {
+                        display: none !important;
+                    }
+                    .nav-search-box {
+                        max-width: 100%;
+                        padding: 6px 10px;
+                    }
+                    .nav-search-input {
+                        font-size: 12px;
+                    }
+                    .btn-clear-cache {
+                        padding: 5px 8px;
+                        font-size: 11px;
+                    }
+                    .cache-btn-text {
+                        display: none; /* Icon-only or compact on tiny phones */
+                    }
+                    .btn-clear-cache::after {
+                        content: 'Clear';
+                    }
+                    .notif-dropdown-panel {
+                        width: calc(100vw - 20px);
+                        right: -50px;
+                    }
+                }
+            `}</style>
         </nav>
     );
 }
