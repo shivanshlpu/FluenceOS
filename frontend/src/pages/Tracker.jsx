@@ -4,22 +4,22 @@ export default function Tracker() {
     return (
         <div>
             {/* Gradient header */}
-            <div style={{
-                padding: '60px 24px 24px',
+            <div className="page-header-container" style={{
+                padding: '40px 24px 20px',
                 background: 'linear-gradient(180deg, rgba(239, 68, 68, 0.25) 0%, transparent 100%)',
             }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-                    <div style={{
-                        width: '120px', height: '120px', borderRadius: 'var(--radius-xs, 12px)',
+                <div className="page-header-flex" style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                    <div className="page-header-icon" style={{
+                        width: '80px', height: '80px', borderRadius: 'var(--radius-md, 12px)',
                         background: 'linear-gradient(135deg, #ef4444, #f97316)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        boxShadow: '0 8px 32px rgba(239, 68, 68, 0.4)', flexShrink: 0, fontSize: '54px',
+                        boxShadow: '0 8px 32px rgba(239, 68, 68, 0.4)', flexShrink: 0, fontSize: '40px',
                     }}>🔥</div>
                     <div>
-                        <p className="label-caps" style={{ marginBottom: '8px', color: '#fb923c', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', fontSize: '11px' }}>OS System</p>
-                        <h1 style={{ fontSize: '40px', fontWeight: 900, letterSpacing: '-1px', marginBottom: '8px', color: '#fff' }}>Growth & Habit Tracker</h1>
-                        <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
-                            Track your speaking streaks, daily practice heatmap, milestones, and habit consistency
+                        <p className="label-caps" style={{ marginBottom: '6px', color: '#fb923c', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', fontSize: '11px' }}>AI Module</p>
+                        <h1 className="page-header-title" style={{ fontSize: '36px', fontWeight: 900, letterSpacing: '-0.5px', marginBottom: '6px', color: '#fff' }}>Growth & Habit Tracker</h1>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
+                            Track speaking streaks, 365-day practice heatmap, milestones & habit consistency
                         </p>
                     </div>
                 </div>
