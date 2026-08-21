@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import html2pdf from 'html2pdf.js';
 import { initialResumeData } from './resumeData';
 import { DynamicCVRenderer } from './DynamicCVRenderer';
-import { ChevronRight, ChevronLeft, Download, Save, Sparkles, Check, Loader } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Download, Save, Sparkles, Check, Loader, Edit3, Eye } from 'lucide-react';
 import './ResumeBuilder.css';
 
 export const ResumeBuilder = () => {
@@ -17,13 +17,12 @@ export const ResumeBuilder = () => {
   const [jobDescription, setJobDescription] = useState('');
 
   const previewWrapperRef = useRef(null);
-  const stepScrollRef = useRef(null);
 
   // Auto-fit A4 preview on mobile screens
   useEffect(() => {
     const calculateScale = () => {
       if (previewWrapperRef.current) {
-        const availableWidth = previewWrapperRef.current.offsetWidth - 24;
+        const availableWidth = previewWrapperRef.current.offsetWidth - 20;
         const a4WidthPx = 794; // 210mm @ 96dpi
         if (availableWidth < a4WidthPx && availableWidth > 0) {
           setScale(availableWidth / a4WidthPx);
@@ -155,45 +154,45 @@ export const ResumeBuilder = () => {
   };
 
   const steps = [
-    { id: 'personal', label: '1. Personal' },
-    { id: 'skills', label: '2. Skills' },
-    { id: 'experience', label: '3. Experience' },
-    { id: 'projects', label: '4. Projects' },
-    { id: 'training', label: '5. Training & Certs' },
-    { id: 'education', label: '6. Education' }
+    { id: 'personal', num: '1', label: 'Personal' },
+    { id: 'skills', num: '2', label: 'Skills' },
+    { id: 'experience', num: '3', label: 'Experience' },
+    { id: 'projects', num: '4', label: 'Projects' },
+    { id: 'training', num: '5', label: 'Training' },
+    { id: 'education', num: '6', label: 'Education' }
   ];
 
   const currentStepIdx = steps.findIndex(s => s.id === activeStep);
   const goToNextStep = () => {
     if (currentStepIdx < steps.length - 1) {
       setActiveStep(steps[currentStepIdx + 1].id);
-      window.scrollTo({ top: 120, behavior: 'smooth' });
+      window.scrollTo({ top: 100, behavior: 'smooth' });
     }
   };
   const goToPrevStep = () => {
     if (currentStepIdx > 0) {
       setActiveStep(steps[currentStepIdx - 1].id);
-      window.scrollTo({ top: 120, behavior: 'smooth' });
+      window.scrollTo({ top: 100, behavior: 'smooth' });
     }
   };
 
   return (
     <div className="resume-app-wrapper">
-      {/* Mobile Top View Switcher */}
+      {/* Mobile Top Mode Toggle Bar */}
       <div className="mobile-toggle-bar">
         <button
           type="button"
           className={`mobile-toggle-btn ${mobileMode === 'edit' ? 'active' : ''}`}
           onClick={() => setMobileMode('edit')}
         >
-          ✏️ Edit CV Details
+          <Edit3 size={14} /> Edit CV Form
         </button>
         <button
           type="button"
           className={`mobile-toggle-btn ${mobileMode === 'preview' ? 'active' : ''}`}
           onClick={() => setMobileMode('preview')}
         >
-          👁️ A4 Live Preview
+          <Eye size={14} /> A4 Live Preview
         </button>
       </div>
 
@@ -208,28 +207,28 @@ export const ResumeBuilder = () => {
           </div>
         </div>
 
-        {/* Archetype Template Selector */}
-        <div className="archetype-selector-wrapper">
+        {/* Archetype Template Selector (All 3 Options 100% Visible) */}
+        <div className="archetype-grid-selector">
           <button
             type="button"
             className={`archetype-pill ${cvType === 'specialized' ? 'active' : ''}`}
             onClick={() => setCvType('specialized')}
           >
-            💻 Specialized Tech (Rulebook)
+            💻 Specialized Tech
           </button>
           <button
             type="button"
             className={`archetype-pill ${cvType === 'general' ? 'active' : ''}`}
             onClick={() => setCvType('general')}
           >
-            📄 Minimal General ATS
+            📄 Minimal General
           </button>
           <button
             type="button"
             className={`archetype-pill ${cvType === 'executive' ? 'active' : ''}`}
             onClick={() => setCvType('executive')}
           >
-            👔 Executive / Senior
+            👔 Executive Senior
           </button>
         </div>
 
@@ -244,7 +243,7 @@ export const ResumeBuilder = () => {
             onClick={handleExportPDF}
           >
             {isExporting ? <Loader size={15} className="animate-spin" /> : <Download size={15} />}
-            {isExporting ? 'Generating Clean PDF...' : 'Export PDF'}
+            {isExporting ? 'Generating PDF...' : 'Export PDF'}
           </button>
         </div>
       </div>
@@ -253,16 +252,18 @@ export const ResumeBuilder = () => {
       <div className="builder-main-grid">
         {/* LEFT COLUMN: FORM CONTROLS */}
         <div className={`form-column-container ${mobileMode === 'preview' ? 'hide-on-mobile' : ''}`}>
-          {/* Horizontal Scrollable Step Pills */}
-          <div className="step-navigation-scroll" ref={stepScrollRef}>
-            {steps.map(s => (
+          
+          {/* Responsive 6-Step Grid Selector (All 6 Steps 100% Visible & Tapable) */}
+          <div className="steps-grid-selector">
+            {steps.map((s) => (
               <button
                 key={s.id}
                 type="button"
-                className={`nav-step-pill ${activeStep === s.id ? 'active' : ''}`}
+                className={`step-grid-pill ${activeStep === s.id ? 'active' : ''}`}
                 onClick={() => setActiveStep(s.id)}
               >
-                {s.label}
+                <span className="step-num">{s.num}</span>
+                <span className="step-txt">{s.label}</span>
               </button>
             ))}
           </div>
