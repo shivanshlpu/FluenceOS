@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ExternalLink, Sparkles, Video, Flame, ShieldAlert, BookOpen, X, Share2, Check, Clock, User } from 'lucide-react';
-import { formatTimeAgo } from '../../../utils/formatters';
+import { formatTimeAgo, formatDateDDMMYYYY } from '../../../utils/formatters';
 
 const impactBadge = {
     critical: { bg: '#ef444422', color: '#ef4444', border: '#ef444444', icon: ShieldAlert, label: 'Critical' },
@@ -122,7 +122,7 @@ export default function NewsCard({ article, index = 0 }) {
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>
                         <Clock size={12} />
-                        <span>{article.publishedAt ? formatTimeAgo(article.publishedAt) : 'Recent'}</span>
+                        <span>{article.publishedAt ? formatDateDDMMYYYY(article.publishedAt) : 'Recent'}</span>
                     </div>
                 </div>
 
@@ -287,9 +287,9 @@ export default function NewsCard({ article, index = 0 }) {
                             <h2 style={{ fontSize: '22px', fontWeight: 900, lineHeight: 1.4, color: '#fff', marginBottom: '8px' }}>
                                 {article.title || article.summary?.slice(0, 100)}
                             </h2>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', color: 'var(--text-muted)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
                                 <span>✍️ Source: <strong style={{ color: 'var(--text-primary)' }}>{article.author?.name || article.source || 'DataCube AI'}</strong></span>
-                                <span>🕒 {article.publishedAt ? formatTimeAgo(article.publishedAt) : 'Recent'}</span>
+                                <span>🕒 Published: <strong style={{ color: 'var(--text-primary)' }}>{article.publishedAt ? formatDateDDMMYYYY(article.publishedAt) : 'Recent'}</strong></span>
                             </div>
                         </div>
 

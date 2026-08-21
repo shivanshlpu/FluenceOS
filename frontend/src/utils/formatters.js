@@ -5,12 +5,32 @@ export const formatDuration = (seconds) => {
 };
 
 export const formatDate = (dateStr) => {
+    return formatDateDDMMYYYY(dateStr);
+};
+
+export const formatDateDDMMYYYY = (dateStr) => {
+    if (!dateStr) return '';
     const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-    });
+    if (isNaN(date.getTime())) {
+        const parts = String(dateStr).split('-');
+        if (parts.length === 3) {
+            const [y, m, d] = parts;
+            return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
+        }
+        return dateStr;
+    }
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+};
+
+export const toInputDateFormat = (date = new Date()) => {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
 };
 
 export const formatTimeAgo = (dateStr) => {

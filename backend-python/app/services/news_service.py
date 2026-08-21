@@ -196,20 +196,45 @@ def extract_tags(text: str) -> list:
 
 async def get_all_news(category_type: str = "tech", period_id: Optional[str] = None, lang: str = "en") -> List[Dict[str, Any]]:
     """
-    Primary: Fetch from DataCube AI News API.
-    Fallback: RSS Feeds if DataCube returns empty.
+    Primary: Fetch from DataCube AI News API by period/date.
+    Smart Fallbacks:
+      1. If specific date is empty, try the corresponding week (e.g., 2026-kw34).
+      2. If still empty, try latest active period.
+      3. Fallback to live RSS feeds.
     """
+    if not period_id:
+        period_id = await get_latest_active_period()
+
+    # 1. Try exact period / date
     datacube_articles = await fetch_datacube_news(category_type=category_type, period_id=period_id, lang=lang)
     if datacube_articles:
         return datacube_articles
 
-    # If specific category like investment/tips requested and empty, try tech
+    # 2. If it's a date YYYY-MM-DD, try the week period (e.g. 2026-kw34)
+    if period_id and len(period_id) == 10 and "-" in period_id:
+        try:
+            dt = datetime.strptime(period_id, "%Y-%m-%d")
+            week_id = f"{dt.year}-kw{dt.isocalendar()[1]}"
+            week_articles = await fetch_datacube_news(category_type=category_type, period_id=week_id, lang=lang)
+            if week_articles:
+                return week_articles
+        except Exception:
+            pass
+
+    # 3. If specific category requested and empty, try tech
     if category_type != "tech":
         fallback_tech = await fetch_datacube_news(category_type="tech", period_id=period_id, lang=lang)
         if fallback_tech:
             return fallback_tech
 
-    # Fallback to parallel RSS Feeds
+    # 4. Try latest active period
+    latest_id = await get_latest_active_period()
+    if latest_id != period_id:
+        latest_articles = await fetch_datacube_news(category_type=category_type, period_id=latest_id, lang=lang)
+        if latest_articles:
+            return latest_articles
+
+    # 5. Fallback to parallel RSS Feeds
     tasks = []
     for cat, urls in RSS_FEEDS.items():
         for url in urls:

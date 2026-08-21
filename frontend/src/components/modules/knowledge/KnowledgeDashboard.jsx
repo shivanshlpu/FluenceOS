@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import NewsCard from './NewsCard';
 import { pythonAPI } from '../../../services/api';
-import { RefreshCw, Loader, AlertCircle, Sparkles, TrendingUp, DollarSign, Lightbulb, Video, Calendar, Globe, Search } from 'lucide-react';
+import { RefreshCw, Loader, AlertCircle, Sparkles, TrendingUp, DollarSign, Lightbulb, Video, Calendar, Globe, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { formatDateDDMMYYYY, toInputDateFormat } from '../../../utils/formatters';
 
 const TYPE_TABS = [
     { id: 'tech', label: 'AI Tech & Research', icon: Sparkles, color: '#a855f7' },
@@ -22,8 +23,8 @@ const LANGUAGES = [
 
 export default function KnowledgeDashboard() {
     const [activeType, setActiveType] = useState('tech');
-    const [selectedPeriod, setSelectedPeriod] = useState('');
-    const [periods, setPeriods] = useState([]);
+    // selectedDate in YYYY-MM-DD format for input & backend query
+    const [selectedDate, setSelectedDate] = useState(() => toInputDateFormat(new Date()));
     const [language, setLanguage] = useState('en');
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedTag, setSelectedTag] = useState('All');
@@ -33,34 +34,12 @@ export default function KnowledgeDashboard() {
     const [error, setError] = useState(null);
     const [lastRefreshed, setLastRefreshed] = useState(null);
 
-    // Load available periods on mount
-    useEffect(() => {
-        const loadPeriods = async () => {
-            try {
-                const data = await pythonAPI.get('/api/knowledge/periods');
-                const weeksList = data?.weeks || [];
-                const allDays = [];
-                weeksList.forEach(w => {
-                    if (w.days) {
-                        w.days.forEach(d => allDays.push({ id: d.id, label: `${d.id} (${d.weekday || ''})` }));
-                    }
-                    allDays.push({ id: w.id, label: `Week: ${w.label || w.id}` });
-                });
-                setPeriods(allDays);
-                if (allDays.length > 0) {
-                    setSelectedPeriod(allDays[0].id);
-                }
-            } catch (err) {
-                console.warn('Could not load period list, using default today:', err);
-            }
-        };
-        loadPeriods();
-    }, []);
+    const dateInputRef = useRef(null);
 
-    // Load news whenever activeType, selectedPeriod, or language changes
+    // Load news whenever activeType, selectedDate, or language changes
     useEffect(() => {
         loadNews();
-    }, [activeType, selectedPeriod, language]);
+    }, [activeType, selectedDate, language]);
 
     const loadNews = async () => {
         setLoading(true);
@@ -69,10 +48,8 @@ export default function KnowledgeDashboard() {
             const params = {
                 type: activeType,
                 lang: language,
+                period: selectedDate,
             };
-            if (selectedPeriod) {
-                params.period = selectedPeriod;
-            }
 
             const data = await pythonAPI.get('/api/knowledge/news', { params });
             const list = Array.isArray(data.articles) ? data.articles : (Array.isArray(data) ? data : []);
@@ -80,10 +57,34 @@ export default function KnowledgeDashboard() {
             setLastRefreshed(new Date());
         } catch (err) {
             console.error('Knowledge news fetch failed:', err);
-            setError('Failed to load news from DataCube AI API. Falling back to local cache.');
+            setError('Failed to load news for selected date. Falling back to live feeds.');
             setArticles([]);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleDateStep = (days) => {
+        const current = new Date(selectedDate || new Date());
+        current.setDate(current.getDate() + days);
+        setSelectedDate(toInputDateFormat(current));
+    };
+
+    const handleSetToday = () => {
+        setSelectedDate(toInputDateFormat(new Date()));
+    };
+
+    const openCalendarPicker = () => {
+        if (dateInputRef.current) {
+            try {
+                if (dateInputRef.current.showPicker) {
+                    dateInputRef.current.showPicker();
+                } else {
+                    dateInputRef.current.focus();
+                }
+            } catch (e) {
+                dateInputRef.current.focus();
+            }
         }
     };
 
@@ -99,6 +100,8 @@ export default function KnowledgeDashboard() {
             a.category?.toLowerCase().includes(searchQuery.toLowerCase());
         return matchesTag && matchesSearch;
     });
+
+    const isToday = selectedDate === toInputDateFormat(new Date());
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -133,7 +136,7 @@ export default function KnowledgeDashboard() {
                         </p>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                         {/* Language Selector */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--bg-elevated-2)', padding: '6px 12px', borderRadius: '8px' }}>
                             <Globe size={14} color="var(--text-muted)" />
@@ -158,31 +161,118 @@ export default function KnowledgeDashboard() {
                             </select>
                         </div>
 
-                        {/* Period / Date Selector */}
-                        {periods.length > 0 && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--bg-elevated-2)', padding: '6px 12px', borderRadius: '8px' }}>
-                                <Calendar size={14} color="var(--text-muted)" />
-                                <select
-                                    value={selectedPeriod}
-                                    onChange={(e) => setSelectedPeriod(e.target.value)}
+                        {/* Interactive Calendar Date Picker in DD/MM/YYYY */}
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            background: 'var(--bg-elevated-2)',
+                            padding: '4px 8px',
+                            borderRadius: '10px',
+                            border: '1px solid rgba(255,255,255,0.08)',
+                            position: 'relative',
+                        }}>
+                            <button
+                                onClick={() => handleDateStep(-1)}
+                                title="Previous Day"
+                                style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: 'var(--text-secondary)',
+                                    cursor: 'pointer',
+                                    padding: '4px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    borderRadius: '4px',
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
+                                onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-secondary)'}
+                            >
+                                <ChevronLeft size={16} />
+                            </button>
+
+                            {/* Clickable Date Display with Calendar Icon & Input */}
+                            <div
+                                onClick={openCalendarPicker}
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    cursor: 'pointer',
+                                    padding: '4px 8px',
+                                    borderRadius: '6px',
+                                    background: 'rgba(255,255,255,0.04)',
+                                }}
+                                title="Click to open calendar (DD/MM/YYYY)"
+                            >
+                                <Calendar size={14} color="#a855f7" />
+                                <span style={{
+                                    fontSize: '13px',
+                                    fontWeight: 800,
+                                    color: '#fff',
+                                    letterSpacing: '0.5px',
+                                }}>
+                                    {formatDateDDMMYYYY(selectedDate)}
+                                </span>
+
+                                {/* Hidden HTML5 Date Input Trigger */}
+                                <input
+                                    ref={dateInputRef}
+                                    type="date"
+                                    value={selectedDate}
+                                    onChange={(e) => {
+                                        if (e.target.value) {
+                                            setSelectedDate(e.target.value);
+                                        }
+                                    }}
                                     style={{
-                                        background: 'transparent',
-                                        border: 'none',
-                                        color: 'var(--text-primary)',
-                                        fontSize: '12px',
-                                        fontWeight: 700,
-                                        outline: 'none',
+                                        position: 'absolute',
+                                        opacity: 0,
+                                        width: '1px',
+                                        height: '1px',
+                                        pointerEvents: 'none',
+                                    }}
+                                />
+                            </div>
+
+                            <button
+                                onClick={() => handleDateStep(1)}
+                                title="Next Day"
+                                style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: 'var(--text-secondary)',
+                                    cursor: 'pointer',
+                                    padding: '4px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    borderRadius: '4px',
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
+                                onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-secondary)'}
+                            >
+                                <ChevronRight size={16} />
+                            </button>
+
+                            {!isToday && (
+                                <button
+                                    onClick={handleSetToday}
+                                    style={{
+                                        padding: '3px 8px',
+                                        borderRadius: '6px',
+                                        background: 'rgba(168, 85, 247, 0.2)',
+                                        color: '#a855f7',
+                                        border: '1px solid rgba(168, 85, 247, 0.4)',
+                                        fontSize: '11px',
+                                        fontWeight: 800,
                                         cursor: 'pointer',
+                                        marginLeft: '4px',
                                     }}
                                 >
-                                    {periods.map(p => (
-                                        <option key={p.id} value={p.id} style={{ background: '#1e1e1e', color: '#fff' }}>
-                                            {p.label}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                        )}
+                                    Today
+                                </button>
+                            )}
+                        </div>
 
                         <button
                             onClick={loadNews}
@@ -327,7 +417,7 @@ export default function KnowledgeDashboard() {
             ) : (
                 <div>
                     <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px', fontWeight: 600 }}>
-                        Showing {filteredArticles.length} updates for {selectedPeriod || 'Latest'}
+                        Showing {filteredArticles.length} updates for {formatDateDDMMYYYY(selectedDate)}
                     </div>
                     <div>
                         {filteredArticles.map((article, i) => (
