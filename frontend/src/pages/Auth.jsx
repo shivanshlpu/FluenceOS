@@ -70,11 +70,10 @@ export default function Auth() {
             >
                 {/* Logo */}
                 <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-                    <div style={{
-                        width: '48px', height: '48px', borderRadius: '50%', margin: '0 auto 16px',
-                        background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '20px', fontWeight: 900, color: '#fff',
-                    }}>G</div>
+                    <img src="/logo.png" alt="FluenceOS Logo" style={{
+                        width: '64px', height: '64px', borderRadius: '16px', margin: '0 auto 16px',
+                        display: 'block', boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
+                    }} />
                     <h1 style={{ fontSize: '24px', fontWeight: 900, marginBottom: '4px' }}>
                         {isLogin ? 'Welcome back' : 'Create account'}
                     </h1>

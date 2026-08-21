@@ -71,8 +71,8 @@ export default function Sidebar() {
             <div style={{ background: 'var(--bg-elevated-1)', borderRadius: 'var(--radius-md)', padding: '12px 8px' }}>
                 {/* Logo */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 12px 16px' }}>
-                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', fontWeight: 900, color: '#fff' }}>G</div>
-                    <span style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>AI Growth OS</span>
+                    <img src="/logo.png" alt="FluenceOS Logo" style={{ width: '34px', height: '34px', borderRadius: '8px', objectFit: 'cover' }} />
+                    <span style={{ fontWeight: 800, fontSize: '16px', color: 'var(--text-primary)', letterSpacing: '-0.3px' }}>FluenceOS</span>
                 </div>
 
                 {/* Nav links */}
