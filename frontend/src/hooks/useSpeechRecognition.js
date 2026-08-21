@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
 export const useSpeechRecognition = () => {
     const [transcript, setTranscript] = useState('');
@@ -6,14 +6,36 @@ export const useSpeechRecognition = () => {
     const [isListening, setIsListening] = useState(false);
     const [error, setError] = useState(null);
     const recognitionRef = useRef(null);
-    const silenceTimerRef = useRef(null);
     const stopRequestedRef = useRef(false);
+    const isMountedRef = useRef(true);
+
+    useEffect(() => {
+        isMountedRef.current = true;
+        return () => {
+            isMountedRef.current = false;
+            stopRequestedRef.current = true;
+            try {
+                if (recognitionRef.current) {
+                    recognitionRef.current.stop();
+                }
+            } catch (e) {
+                // ignore cleanup errors
+            }
+        };
+    }, []);
 
     const startListening = useCallback(() => {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
-            setError('Speech recognition not supported. Use Chrome or Edge.');
+            setError('Speech recognition not supported in this browser. Use Chrome or Edge.');
             return;
+        }
+
+        // Clean up previous instance if any
+        if (recognitionRef.current) {
+            try {
+                recognitionRef.current.stop();
+            } catch (e) {}
         }
 
         const recognition = new SpeechRecognition();
@@ -22,6 +44,7 @@ export const useSpeechRecognition = () => {
         recognition.lang = 'en-US';
 
         recognition.onresult = (event) => {
+            if (!isMountedRef.current) return;
             let finalText = '';
             let interimText = '';
 
@@ -39,42 +62,64 @@ export const useSpeechRecognition = () => {
         };
 
         recognition.onstart = () => {
-            setIsListening(true);
-            stopRequestedRef.current = false;
+            if (isMountedRef.current) {
+                setIsListening(true);
+                stopRequestedRef.current = false;
+                setError(null);
+            }
         };
+
         recognition.onend = () => {
+            if (!isMountedRef.current) return;
+
             if (!stopRequestedRef.current) {
-                // Browser stopped it automatically (due to silence). Restart it.
+                // Try restarting once if stopped unexpectedly (due to silence), but only if still mounted
                 try {
                     recognition.start();
                 } catch (e) {
+                    if (isMountedRef.current) {
+                        setIsListening(false);
+                        setInterimTranscript('');
+                    }
+                }
+            } else {
+                if (isMountedRef.current) {
                     setIsListening(false);
                     setInterimTranscript('');
                 }
-            } else {
-                setIsListening(false);
-                setInterimTranscript('');
             }
         };
+
         recognition.onerror = (e) => {
+            if (!isMountedRef.current) return;
             if (e.error === 'no-speech') {
-                // Ignore no-speech errors, let it continue or let onend restart it
                 return;
             }
+            console.warn('Speech recognition warning:', e.error);
             setError(e.error);
+            if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+                stopRequestedRef.current = true;
+                setIsListening(false);
+            }
         };
 
         recognitionRef.current = recognition;
         try {
             recognition.start();
         } catch (e) {
-            console.error(e);
+            console.warn('Recognition start exception:', e);
         }
     }, []);
 
     const stopListening = useCallback(() => {
         stopRequestedRef.current = true;
-        recognitionRef.current?.stop();
+        try {
+            recognitionRef.current?.stop();
+        } catch (e) {}
+        if (isMountedRef.current) {
+            setIsListening(false);
+            setInterimTranscript('');
+        }
     }, []);
 
     const resetTranscript = useCallback(() => {
