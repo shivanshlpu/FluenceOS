@@ -1,6 +1,8 @@
 import asyncpg
 from app.config import DATABASE_URL
 
+import ssl
+
 # Global pool reference
 pool = None
 
@@ -16,16 +18,20 @@ async def connect_db():
 
         print(f"🔄 Connecting to PostgreSQL at {clean_url.split('@')[-1]}...")
         
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
         # Disable prepared statement caching (recommended for Supabase Supavisor pooler)
         pool = await asyncpg.create_pool(
             dsn=clean_url,
             min_size=1,
             max_size=10,
-            command_timeout=60,
+            command_timeout=30,
             statement_cache_size=0,
-            ssl="require",
+            ssl=ctx,
         )
-        print("✅ Connected to PostgreSQL")
+        print("✅ Connected to PostgreSQL successfully!")
         
     except Exception as e:
         print(f"⚠️ PostgreSQL connection failed: {e}")
