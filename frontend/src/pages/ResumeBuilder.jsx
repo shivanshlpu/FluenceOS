@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
+import html2pdf from 'html2pdf.js';
 import { initialResumeData } from './resumeData';
 import { DynamicCVRenderer } from './DynamicCVRenderer';
+import { ChevronRight, ChevronLeft, Download, Save, Sparkles, Check, Loader } from 'lucide-react';
 import './ResumeBuilder.css';
 
 export const ResumeBuilder = () => {
@@ -11,17 +13,19 @@ export const ResumeBuilder = () => {
   const [scale, setScale] = useState(1);
   const [atsScore, setAtsScore] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [jobDescription, setJobDescription] = useState('');
 
   const previewWrapperRef = useRef(null);
+  const stepScrollRef = useRef(null);
 
   // Auto-fit A4 preview on mobile screens
   useEffect(() => {
     const calculateScale = () => {
       if (previewWrapperRef.current) {
-        const availableWidth = previewWrapperRef.current.offsetWidth - 20;
+        const availableWidth = previewWrapperRef.current.offsetWidth - 24;
         const a4WidthPx = 794; // 210mm @ 96dpi
-        if (availableWidth < a4WidthPx) {
+        if (availableWidth < a4WidthPx && availableWidth > 0) {
           setScale(availableWidth / a4WidthPx);
         } else {
           setScale(1);
@@ -33,9 +37,43 @@ export const ResumeBuilder = () => {
     return () => window.removeEventListener('resize', calculateScale);
   }, [mobileMode, cvType]);
 
-  // Export to PDF
-  const handleExportPDF = () => {
-    window.print();
+  // Clean PDF Export using html2pdf.js targeting ONLY the A4 resume sheet
+  const handleExportPDF = async () => {
+    const element = document.getElementById('resume-a4-page');
+    if (!element) {
+      window.print();
+      return;
+    }
+
+    setIsExporting(true);
+
+    try {
+      const fileName = `${(resumeData.header.fullName || 'Resume').trim().replace(/\s+/g, '_')}_CV.pdf`;
+      const opt = {
+        margin: [0, 0, 0, 0],
+        filename: fileName,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          scrollY: 0,
+          scrollX: 0
+        },
+        jsPDF: {
+          unit: 'mm',
+          format: 'a4',
+          orientation: 'portrait'
+        }
+      };
+
+      await html2pdf().set(opt).from(element).save();
+    } catch (err) {
+      console.warn('html2pdf export failed, falling back to print:', err);
+      window.print();
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   // ATS Scanner Mock Calculation
@@ -44,8 +82,8 @@ export const ResumeBuilder = () => {
     setIsScanning(true);
     setTimeout(() => {
       setIsScanning(false);
-      setAtsScore(92);
-    }, 900);
+      setAtsScore(94);
+    }, 800);
   };
 
   // Form Handlers
@@ -125,6 +163,20 @@ export const ResumeBuilder = () => {
     { id: 'education', label: '6. Education' }
   ];
 
+  const currentStepIdx = steps.findIndex(s => s.id === activeStep);
+  const goToNextStep = () => {
+    if (currentStepIdx < steps.length - 1) {
+      setActiveStep(steps[currentStepIdx + 1].id);
+      window.scrollTo({ top: 120, behavior: 'smooth' });
+    }
+  };
+  const goToPrevStep = () => {
+    if (currentStepIdx > 0) {
+      setActiveStep(steps[currentStepIdx - 1].id);
+      window.scrollTo({ top: 120, behavior: 'smooth' });
+    }
+  };
+
   return (
     <div className="resume-app-wrapper">
       {/* Mobile Top View Switcher */}
@@ -183,10 +235,16 @@ export const ResumeBuilder = () => {
 
         <div className="hero-actions-row">
           <button type="button" className="btn-secondary" onClick={() => alert("CV saved to local profile!")}>
-            💾 Save CV
+            <Save size={15} /> Save CV
           </button>
-          <button type="button" className="btn-primary" onClick={handleExportPDF}>
-            📥 Export PDF
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={isExporting}
+            onClick={handleExportPDF}
+          >
+            {isExporting ? <Loader size={15} className="animate-spin" /> : <Download size={15} />}
+            {isExporting ? 'Generating Clean PDF...' : 'Export PDF'}
           </button>
         </div>
       </div>
@@ -196,7 +254,7 @@ export const ResumeBuilder = () => {
         {/* LEFT COLUMN: FORM CONTROLS */}
         <div className={`form-column-container ${mobileMode === 'preview' ? 'hide-on-mobile' : ''}`}>
           {/* Horizontal Scrollable Step Pills */}
-          <div className="step-navigation-scroll">
+          <div className="step-navigation-scroll" ref={stepScrollRef}>
             {steps.map(s => (
               <button
                 key={s.id}
@@ -291,6 +349,13 @@ export const ResumeBuilder = () => {
                   onChange={e => updateHeader('summary', e.target.value)}
                 />
               </div>
+
+              {/* Step Navigation Actions */}
+              <div className="step-footer-actions">
+                <button type="button" className="btn-step-next" onClick={goToNextStep}>
+                  Next: Skills Summary <ChevronRight size={16} />
+                </button>
+              </div>
             </div>
           )}
 
@@ -298,7 +363,7 @@ export const ResumeBuilder = () => {
           {activeStep === 'skills' && (
             <div className="section-card">
               <h3 className="section-card-title">Skills Summary</h3>
-              <p className="card-hint">List comma-separated items per technical domain according to the rulebook.</p>
+              <p className="card-hint">List comma-separated items per category according to the rulebook.</p>
               {resumeData.skills.map((s, idx) => (
                 <div key={idx} className="form-field" style={{ marginBottom: '10px' }}>
                   <label><strong>{s.category}</strong></label>
@@ -309,6 +374,15 @@ export const ResumeBuilder = () => {
                   />
                 </div>
               ))}
+
+              <div className="step-footer-actions">
+                <button type="button" className="btn-step-prev" onClick={goToPrevStep}>
+                  <ChevronLeft size={16} /> Previous
+                </button>
+                <button type="button" className="btn-step-next" onClick={goToNextStep}>
+                  Next: Experience <ChevronRight size={16} />
+                </button>
+              </div>
             </div>
           )}
 
@@ -388,10 +462,19 @@ export const ResumeBuilder = () => {
                   </div>
                 </div>
               ))}
+
+              <div className="step-footer-actions">
+                <button type="button" className="btn-step-prev" onClick={goToPrevStep}>
+                  <ChevronLeft size={16} /> Previous
+                </button>
+                <button type="button" className="btn-step-next" onClick={goToNextStep}>
+                  Next: Projects <ChevronRight size={16} />
+                </button>
+              </div>
             </div>
           )}
 
-          {/* STEP 4: PROJECTS (With dedicated GitHub, Live, and Tech Stack inputs) */}
+          {/* STEP 4: PROJECTS */}
           {activeStep === 'projects' && (
             <div className="section-card">
               <div className="card-top-header">
@@ -482,6 +565,15 @@ export const ResumeBuilder = () => {
                   </div>
                 </div>
               ))}
+
+              <div className="step-footer-actions">
+                <button type="button" className="btn-step-prev" onClick={goToPrevStep}>
+                  <ChevronLeft size={16} /> Previous
+                </button>
+                <button type="button" className="btn-step-next" onClick={goToNextStep}>
+                  Next: Training & Certs <ChevronRight size={16} />
+                </button>
+              </div>
             </div>
           )}
 
@@ -515,6 +607,15 @@ export const ResumeBuilder = () => {
                     />
                   </div>
                 ))}
+              </div>
+
+              <div className="step-footer-actions">
+                <button type="button" className="btn-step-prev" onClick={goToPrevStep}>
+                  <ChevronLeft size={16} /> Previous
+                </button>
+                <button type="button" className="btn-step-next" onClick={goToNextStep}>
+                  Next: Education <ChevronRight size={16} />
+                </button>
               </div>
             </div>
           )}
@@ -577,6 +678,15 @@ export const ResumeBuilder = () => {
                   </div>
                 </div>
               ))}
+
+              <div className="step-footer-actions">
+                <button type="button" className="btn-step-prev" onClick={goToPrevStep}>
+                  <ChevronLeft size={16} /> Previous
+                </button>
+                <button type="button" className="btn-step-next" onClick={() => setMobileMode('preview')}>
+                  👁️ View A4 Live Preview
+                </button>
+              </div>
             </div>
           )}
 
@@ -622,5 +732,3 @@ export const ResumeBuilder = () => {
     </div>
   );
 };
-
-export default ResumeBuilder;
