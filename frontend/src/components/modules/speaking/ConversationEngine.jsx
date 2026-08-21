@@ -50,19 +50,34 @@ export default function ConversationEngine() {
     const messagesEndRef = useRef(null);
     const speechStartTimeRef = useRef(null);
 
-    // Initialize conversation when scenario changes
-    useEffect(() => {
+    const [hasStarted, setHasStarted] = useState(false);
+
+    const handleStartSession = (scenario = selectedScenario) => {
+        stopSpeakingAI();
+        setSelectedScenario(scenario);
         setMessages([
             {
                 role: 'assistant',
-                content: selectedScenario.initialPrompt,
+                content: scenario.initialPrompt,
                 feedback: null
             }
         ]);
+        setHasStarted(true);
         if (autoSpeak) {
-            speakText(selectedScenario.initialPrompt);
+            speakText(scenario.initialPrompt);
         }
-    }, [selectedScenario]);
+    };
+
+    const handleEndSession = () => {
+        stopSpeakingAI();
+        if (isListening && recognitionRef.current) {
+            recognitionRef.current.stop();
+            setIsListening(false);
+        }
+        setHasStarted(false);
+        setMessages([]);
+        setCurrentTranscript('');
+    };
 
     // Scroll to bottom on new message
     useEffect(() => {
@@ -226,82 +241,154 @@ export default function ConversationEngine() {
         }
     };
 
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Scenario Selection Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
-                {SCENARIOS.map(sc => {
-                    const isSelected = selectedScenario.id === sc.id;
-                    return (
-                        <div
-                            key={sc.id}
-                            onClick={() => {
-                                stopSpeakingAI();
-                                setSelectedScenario(sc);
-                            }}
-                            style={{
-                                padding: '14px',
-                                borderRadius: 'var(--radius-md, 12px)',
-                                background: isSelected ? 'linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(99, 102, 241, 0.2))' : 'var(--bg-elevated-1)',
-                                border: isSelected ? '1.5px solid #a855f7' : '1px solid rgba(255,255,255,0.06)',
-                                cursor: 'pointer',
-                                transition: 'all 0.2s ease',
-                            }}
-                        >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                                <span style={{ fontSize: '20px' }}>{sc.icon}</span>
-                                <h4 style={{ fontSize: '14px', fontWeight: 800, color: isSelected ? '#a855f7' : 'var(--text-primary)' }}>
-                                    {sc.title}
-                                </h4>
-                            </div>
-                            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                                {sc.desc}
+    if (!hasStarted) {
+        return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                {/* Scenario Selection Grid */}
+                <div style={{
+                    padding: '24px',
+                    background: 'var(--bg-elevated-1)',
+                    borderRadius: '16px',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: 800, marginBottom: '4px', color: '#fff' }}>
+                        1. Select Practice Scenario
+                    </h3>
+                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+                        Choose what you want to practice. The AI coach will tailor questions to your goal:
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                        {SCENARIOS.map(sc => {
+                            const isSelected = selectedScenario.id === sc.id;
+                            return (
+                                <div
+                                    key={sc.id}
+                                    onClick={() => setSelectedScenario(sc)}
+                                    style={{
+                                        padding: '16px',
+                                        borderRadius: 'var(--radius-md, 12px)',
+                                        background: isSelected ? 'linear-gradient(135deg, rgba(168, 85, 247, 0.25), rgba(99, 102, 241, 0.25))' : 'var(--bg-elevated-2)',
+                                        border: isSelected ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.06)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease',
+                                    }}
+                                >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                                        <span style={{ fontSize: '24px' }}>{sc.icon}</span>
+                                        <h4 style={{ fontSize: '15px', fontWeight: 800, color: isSelected ? '#a855f7' : 'var(--text-primary)' }}>
+                                            {sc.title}
+                                        </h4>
+                                    </div>
+                                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                                        {sc.desc}
+                                    </p>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* Difficulty & Launch Bar */}
+                <div style={{
+                    padding: '24px',
+                    background: 'var(--bg-elevated-1)',
+                    borderRadius: '16px',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '18px',
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+                        <div>
+                            <h4 style={{ fontSize: '15px', fontWeight: 800, color: '#fff' }}>2. Choose Difficulty Level</h4>
+                            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                                Affects vocabulary complexity and evaluation depth
                             </p>
                         </div>
-                    );
-                })}
-            </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            {['Beginner', 'Intermediate', 'Advanced'].map(lvl => (
+                                <button
+                                    key={lvl}
+                                    onClick={() => setDifficulty(lvl)}
+                                    style={{
+                                        padding: '8px 16px',
+                                        borderRadius: '8px',
+                                        fontSize: '13px',
+                                        fontWeight: 800,
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        background: difficulty === lvl ? '#a855f7' : 'var(--bg-elevated-2)',
+                                        color: difficulty === lvl ? '#fff' : 'var(--text-secondary)',
+                                        boxShadow: difficulty === lvl ? '0 2px 10px rgba(168, 85, 247, 0.4)' : 'none',
+                                    }}
+                                >
+                                    {lvl}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
 
-            {/* Conversation Control Bar */}
+                    {/* Big Prominent Start Button */}
+                    <button
+                        onClick={() => handleStartSession()}
+                        style={{
+                            width: '100%',
+                            padding: '16px 24px',
+                            borderRadius: '12px',
+                            background: 'linear-gradient(135deg, #a855f7, #6366f1)',
+                            color: '#fff',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontSize: '15px',
+                            fontWeight: 900,
+                            letterSpacing: '0.5px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '10px',
+                            boxShadow: '0 4px 20px rgba(168, 85, 247, 0.4)',
+                            transition: 'transform 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.01)'}
+                        onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                    >
+                        <span>🚀</span> Start {selectedScenario.title} Session
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {/* Active Session Header Bar */}
             <div style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 flexWrap: 'wrap',
                 gap: '12px',
-                padding: '12px 18px',
+                padding: '14px 18px',
                 background: 'var(--bg-elevated-1)',
                 borderRadius: '12px',
                 border: '1px solid rgba(255,255,255,0.06)',
             }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-secondary)' }}>
-                        Difficulty Level:
-                    </span>
-                    {['Beginner', 'Intermediate', 'Advanced'].map(lvl => (
-                        <button
-                            key={lvl}
-                            onClick={() => setDifficulty(lvl)}
-                            style={{
-                                padding: '4px 10px',
-                                borderRadius: '6px',
-                                fontSize: '12px',
-                                fontWeight: 700,
-                                border: 'none',
-                                cursor: 'pointer',
-                                background: difficulty === lvl ? '#a855f7' : 'rgba(255,255,255,0.06)',
-                                color: difficulty === lvl ? '#fff' : 'var(--text-secondary)',
-                            }}
-                        >
-                            {lvl}
-                        </button>
-                    ))}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '20px' }}>{selectedScenario.icon}</span>
+                    <div>
+                        <h4 style={{ fontSize: '14px', fontWeight: 800, color: '#fff' }}>
+                            {selectedScenario.title}
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#a855f7', fontWeight: 700 }}>
+                            {difficulty} Level
+                        </span>
+                    </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     {/* Live Speech Metrics */}
-                    <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                        <span>⚡ Speed: <strong style={{ color: '#60a5fa' }}>{stats.wpm} WPM</strong></span>
+                    <div style={{ display: 'flex', gap: '10px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                        <span>⚡ <strong style={{ color: '#60a5fa' }}>{stats.wpm} WPM</strong></span>
                         <span>⚠️ Fillers: <strong style={{ color: stats.fillerCount > 3 ? '#ef4444' : '#10b981' }}>{stats.fillerCount}</strong></span>
                     </div>
 
@@ -310,7 +397,7 @@ export default function ConversationEngine() {
                         style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '6px',
+                            gap: '4px',
                             background: 'transparent',
                             border: 'none',
                             color: autoSpeak ? '#10b981' : 'var(--text-muted)',
@@ -319,8 +406,24 @@ export default function ConversationEngine() {
                             fontWeight: 700,
                         }}
                     >
-                        {autoSpeak ? <Volume2 size={16} /> : <VolumeX size={16} />}
-                        AI Voice {autoSpeak ? 'ON' : 'OFF'}
+                        {autoSpeak ? <Volume2 size={15} /> : <VolumeX size={15} />}
+                        {autoSpeak ? 'Voice ON' : 'Muted'}
+                    </button>
+
+                    <button
+                        onClick={handleEndSession}
+                        style={{
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            background: 'rgba(255,255,255,0.08)',
+                            color: '#fff',
+                            border: 'none',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                        }}
+                    >
+                        🔄 End / Change Mode
                     </button>
                 </div>
             </div>

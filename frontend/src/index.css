@@ -131,25 +131,33 @@ html, body {
   }
 
   .app-main {
-    padding-bottom: 20px;
+    padding-bottom: 30px;
   }
 
   /* Responsive Page Headers */
+  .page-header-container {
+    padding: 24px 16px 16px !important;
+  }
+
   .page-header-flex {
-    flex-direction: column !important;
-    align-items: flex-start !important;
-    gap: 16px !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 14px !important;
   }
 
   .page-header-icon {
-    width: 80px !important;
-    height: 80px !important;
-    font-size: 36px !important;
+    width: 64px !important;
+    height: 64px !important;
+    font-size: 28px !important;
+    border-radius: 12px !important;
   }
 
   .page-header-title {
-    font-size: 28px !important;
+    font-size: clamp(20px, 5.5vw, 30px) !important;
     letter-spacing: -0.5px !important;
+    line-height: 1.2 !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
   }
 
   /* Responsive Grids */
@@ -172,15 +180,32 @@ html, body {
   }
 
   .mobile-padding {
-    padding: 16px !important;
+    padding: 14px !important;
   }
 }
 
 @media (max-width: 480px) {
+  .page-header-flex {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 12px !important;
+  }
+
+  .page-header-icon {
+    width: 52px !important;
+    height: 52px !important;
+    font-size: 24px !important;
+  }
+
   .responsive-stat-grid,
   .responsive-quick-grid {
     grid-template-columns: 1fr !important;
   }
+}
+
+h1, h2, h3, h4, h5, h6, .page-header-title {
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 /* ── Custom Scrollbar ── */

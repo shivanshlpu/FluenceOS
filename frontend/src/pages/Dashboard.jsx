@@ -64,12 +64,12 @@ export default function Dashboard() {
     return (
         <div>
             {/* Gradient header */}
-            <div style={{
-                padding: '40px 24px 24px',
+            <div className="page-header-container" style={{
+                padding: '40px 24px 20px',
                 background: 'linear-gradient(180deg, var(--grad-dashboard) 0%, transparent 100%)',
             }}>
-                <h1 style={{ fontSize: '32px', fontWeight: 900, marginBottom: '8px' }}>{greeting} 👋</h1>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Welcome back to your AI-powered growth system</p>
+                <h1 className="page-header-title" style={{ fontSize: '32px', fontWeight: 900, marginBottom: '6px' }}>{greeting} 👋</h1>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Welcome back to your personal AI growth OS</p>
             </div>
 
             {/* Quick Access Grid */}

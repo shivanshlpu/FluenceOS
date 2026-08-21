@@ -5,7 +5,7 @@ export default function Speaking() {
     return (
         <div>
             {/* Responsive Gradient header */}
-            <div style={{
+            <div className="page-header-container" style={{
                 padding: '40px 24px 20px',
                 background: 'linear-gradient(180deg, var(--grad-speaking) 0%, transparent 100%)',
             }}>

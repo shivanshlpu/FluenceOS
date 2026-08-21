@@ -26,52 +26,59 @@ if GEMINI_API_KEY:
     try:
         import google.generativeai as genai
         genai.configure(api_key=GEMINI_API_KEY)
-        gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+        gemini_model = genai.GenerativeModel('gemini-2.5-flash')
     except Exception as e:
         print(f"[INFO] Gemini init: {e}")
 
 
 async def generate_ai_response(prompt: str, system: str = "") -> str:
-    """Primary AI call using Groq (LLaMA 3.3 70B REST / SDK), falls back to Gemini"""
+    """Primary AI call using Groq (compound-mini / gpt-oss), falls back to Gemini 2.5 Flash"""
 
-    # 1. PRIMARY: Direct Groq Async REST API
+    # 1. PRIMARY: Groq Async REST API with verified models
     if GROQ_API_KEY:
-        try:
-            headers = {
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": "llama-3.3-70b-versatile",
-                "messages": [
-                    {"role": "system", "content": system or "You are an AI assistant."},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.7,
-                "max_tokens": 2048
-            }
-            async with httpx.AsyncClient(timeout=25.0) as client:
-                res = await client.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
-                if res.status_code == 200:
-                    data = res.json()
-                    return data["choices"][0]["message"]["content"]
-                else:
-                    print(f"[WARNING] Groq HTTP {res.status_code}: {res.text[:200]}")
-        except Exception as groq_err:
-            print(f"[WARNING] Groq REST call failed: {groq_err}, trying Gemini...")
+        groq_models = ["groq/compound-mini", "openai/gpt-oss-120b", "qwen/qwen3.6-27b"]
+        for model_name in groq_models:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "model": model_name,
+                    "messages": [
+                        {"role": "system", "content": system or "You are an AI assistant."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 2048
+                }
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    res = await client.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
+                    if res.status_code == 200:
+                        data = res.json()
+                        return data["choices"][0]["message"]["content"]
+                    else:
+                        print(f"[WARNING] Groq ({model_name}) HTTP {res.status_code}: {res.text[:150]}")
+            except Exception as groq_err:
+                print(f"[WARNING] Groq ({model_name}) failed: {groq_err}")
 
-    # 2. FALLBACK: Gemini
-    if gemini_model:
-        try:
-            full_prompt = f"{system}\n\n{prompt}" if system else prompt
-            response = gemini_model.generate_content(full_prompt)
-            return response.text
-        except Exception as gemini_error:
-            print(f"[WARNING] Gemini failed: {gemini_error}")
+    # 2. FALLBACK: Gemini 2.5 Flash / Flash Latest
+    if GEMINI_API_KEY:
+        gemini_candidates = ['gemini-2.5-flash', 'gemini-flash-latest']
+        for g_model_name in gemini_candidates:
+            try:
+                import google.generativeai as genai
+                m = genai.GenerativeModel(g_model_name)
+                full_prompt = f"{system}\n\n{prompt}" if system else prompt
+                response = m.generate_content(full_prompt)
+                if response and response.text:
+                    return response.text
+            except Exception as gemini_error:
+                print(f"[WARNING] Gemini ({g_model_name}) failed: {gemini_error}")
 
-    # 3. Graceful JSON fallback
+    # 3. Structured fallback if all networks fail
     return json.dumps({
-        "message": "AI service initialized. For custom live responses, set GROQ_API_KEY or GEMINI_API_KEY in .env"
+        "message": "AI service is currently offline. Please check your API keys or internet connection."
     })
 
 

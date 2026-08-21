@@ -148,7 +148,20 @@ export default function CVMaker() {
         <div style={{ padding: '24px' }} className="cv-maker-container mobile-padding">
             {/* Print Stylesheet injected into DOM */}
             <style>{`
+                @page {
+                    size: A4 portrait;
+                    margin: 8mm 10mm;
+                }
                 @media print {
+                    html, body, #root, .app-layout, .app-main {
+                        background: #ffffff !important;
+                        color: #000000 !important;
+                        height: auto !important;
+                        overflow: visible !important;
+                        display: block !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                    }
                     body * { visibility: hidden !important; }
                     #resume-printable-area, #resume-printable-area * { visibility: visible !important; }
                     #resume-printable-area {
@@ -161,6 +174,7 @@ export default function CVMaker() {
                         background: #ffffff !important;
                         color: #000000 !important;
                         box-shadow: none !important;
+                        border: none !important;
                     }
                     .no-print { display: none !important; }
                 }
