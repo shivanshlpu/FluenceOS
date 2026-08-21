@@ -1,40 +1,40 @@
-from motor.motor_asyncio import AsyncIOMotorClient
-from app.config import MONGODB_URL, DB_NAME
+import asyncpg
+from app.config import DATABASE_URL
 
-client = None
-db = None
-
+# Global pool reference
+pool = None
 
 async def connect_db():
-    global client, db
+    global pool
     try:
-        client = AsyncIOMotorClient(MONGODB_URL, serverSelectionTimeoutMS=5000)
-        db = client[DB_NAME]
+        # Check if URL exists and handles basic parse, but allow asyncpg to do the rest.
+        if not DATABASE_URL:
+            print("⚠️ DATABASE_URL is not set in .env. Postgres will fail to connect.")
+            return
 
-        # Test connection by pinging
-        await client.admin.command('ping')
-
-        # Create indexes for performance
-        await db.users.create_index("email", unique=True)
-        await db.speaking_sessions.create_index("userId")
-        await db.speaking_sessions.create_index("createdAt")
-        await db.skill_progress.create_index([("userId", 1), ("skillName", 1)])
-        print(f"✅ Connected to MongoDB: {DB_NAME}")
+        print(f"🔄 Connecting to PostgreSQL...")
+        
+        pool = await asyncpg.create_pool(
+            dsn=DATABASE_URL,
+            min_size=1,
+            max_size=10,
+            command_timeout=60,
+        )
+        print("✅ Connected to PostgreSQL")
+        
     except Exception as e:
-        print(f"⚠️ MongoDB connection failed: {e}")
+        print(f"⚠️ PostgreSQL connection failed: {e}")
         print("⚠️ Server will start but database operations will fail.")
-        print("⚠️ Please check your MONGODB_URL in .env file.")
-        # Still set db to allow server to start (endpoints will fail gracefully)
-        if client:
-            db = client[DB_NAME]
-
-
+        
 async def disconnect_db():
-    global client
-    if client:
-        client.close()
-        print("🔌 Disconnected from MongoDB")
-
+    global pool
+    if pool:
+        await pool.close()
+        print("🔌 Disconnected from PostgreSQL")
 
 def get_db():
-    return db
+    """
+    Returns the asyncpg connection pool.
+    Routers should use: `async with pool.acquire() as conn:`
+    """
+    return pool

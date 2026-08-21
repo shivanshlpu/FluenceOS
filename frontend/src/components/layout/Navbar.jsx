@@ -19,10 +19,30 @@ export default function Navbar() {
     const { notifications, unreadCount, markAllRead, markRead, clearAll } = useNotificationStore();
     const [scrolled, setScrolled] = useState(false);
     const [notifOpen, setNotifOpen] = useState(false);
+    const [deferredPrompt, setDeferredPrompt] = useState(null);
     const panelRef = useRef(null);
 
     // Start news polling for the whole app
     useNewsPoller();
+
+    // PWA Install Prompt Listener
+    useEffect(() => {
+        const handleBeforeInstallPrompt = (e) => {
+            e.preventDefault();
+            setDeferredPrompt(e);
+        };
+        window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+        return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    }, []);
+
+    const handleInstallClick = async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+            setDeferredPrompt(null);
+        }
+    };
 
     useEffect(() => {
         const main = document.querySelector('main');
@@ -67,8 +87,34 @@ export default function Navbar() {
                 </div>
             </div>
 
-            {/* Right: Bell + User */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* Right: PWA Install + Bell + User */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                
+                {/* PWA Install Button */}
+                {deferredPrompt && (
+                    <button 
+                        onClick={handleInstallClick}
+                        style={{
+                            background: 'var(--accent)',
+                            color: '#fff',
+                            border: 'none',
+                            padding: '6px 14px',
+                            borderRadius: 'var(--radius-pill)',
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            transition: 'all 0.2s',
+                            boxShadow: '0 4px 12px rgba(30, 215, 96, 0.2)'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                        onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                    >
+                        <span>⬇️</span> Download App
+                    </button>
+                )}
 
                 {/* Bell Button */}
                 <div ref={panelRef} style={{ position: 'relative' }}>

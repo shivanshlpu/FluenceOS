@@ -5,6 +5,7 @@ from app.database import get_db
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+import json
 
 router = APIRouter()
 
@@ -42,14 +43,19 @@ async def ats_score_check(data: ATSCheckRequest, user=Depends(get_current_user))
 @router.get("/my-cv")
 async def get_my_cv(user=Depends(get_current_user)):
     """GET /api/cv/my-cv — Load user's saved CV"""
-    db = get_db()
-    if db is not None:
+    pool = get_db()
+    if pool is not None:
         try:
-            cv = await db.user_cvs.find_one({"userId": user["_id"]}, sort=[("updatedAt", -1)])
-            if cv:
-                cv["_id"] = str(cv["_id"])
-                cv["userId"] = str(cv["userId"])
-                return {"cv": cv.get("cvData", {}), "title": cv.get("title", "My Resume")}
+            async with pool.acquire() as conn:
+                cv = await conn.fetchrow(
+                    "SELECT cv_data, title FROM user_resumes WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1",
+                    user["id"]
+                )
+                if cv:
+                    cv_data = cv["cv_data"]
+                    if isinstance(cv_data, str):
+                        cv_data = json.loads(cv_data)
+                    return {"cv": cv_data, "title": cv.get("title", "My Resume")}
         except Exception:
             pass
 
@@ -117,19 +123,22 @@ async def get_my_cv(user=Depends(get_current_user)):
 @router.post("/save")
 async def save_my_cv(data: SaveCVRequest, user=Depends(get_current_user)):
     """POST /api/cv/save — Save or update user's CV in DB"""
-    db = get_db()
-    if db is not None:
+    pool = get_db()
+    if pool is not None:
         try:
-            await db.user_cvs.replace_one(
-                {"userId": user["_id"]},
-                {
-                    "userId": user["_id"],
-                    "cvData": data.cvData,
-                    "title": data.title,
-                    "updatedAt": datetime.utcnow()
-                },
-                upsert=True
-            )
+            async with pool.acquire() as conn:
+                cv_json = json.dumps(data.cvData)
+                # Postgres Upsert logic based on user_id assuming one resume per user for now, or just deleting and inserting.
+                # Since we don't have a UNIQUE constraint on user_id, we will delete existing and insert.
+                await conn.execute("DELETE FROM user_resumes WHERE user_id = $1", user["id"])
+                
+                await conn.execute(
+                    """
+                    INSERT INTO user_resumes (user_id, cv_data, title, updated_at)
+                    VALUES ($1, $2::jsonb, $3, now())
+                    """,
+                    user["id"], cv_json, data.title
+                )
             return {"success": True, "message": "CV saved successfully!"}
         except Exception as e:
             return {"success": False, "error": str(e)}

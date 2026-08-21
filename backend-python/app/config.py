@@ -4,8 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Database
-MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
-DB_NAME = "aios"
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 # JWT
 JWT_SECRET = os.getenv("JWT_SECRET", "default_secret_change_this_in_production")

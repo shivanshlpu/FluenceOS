@@ -4,6 +4,7 @@ from app.database import get_db
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from typing import Optional, List, Dict
+import json
 
 router = APIRouter()
 
@@ -29,24 +30,32 @@ async def get_tracker_dashboard(user=Depends(get_current_user)):
     - Milestone badges earned
     - Skill level radar / stats
     """
-    db = get_db()
-    user_id = user["_id"]
+    pool = get_db()
+    user_id = user["id"]
 
     today_str = datetime.utcnow().strftime("%Y-%m-%d")
-
-    # 1. Fetch user speaking sessions & activities
     sessions = []
-    if db is not None:
+
+    if pool is not None:
         try:
-            cursor = db.speaking_sessions.find({"userId": user_id}, {"createdAt": 1, "duration": 1, "topic": 1, "evaluation.overallScore": 1})
-            sessions = await cursor.to_list(1000)
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT created_at, duration_seconds as duration, topic, overall_score 
+                    FROM speaking_sessions 
+                    WHERE user_id = $1
+                    """,
+                    user_id
+                )
+                for r in rows:
+                    sessions.append(dict(r))
         except Exception:
             pass
 
     # 2. Build Activity Heatmap map: {"2026-08-18": 3, "2026-08-19": 5}
     heatmap_counts: Dict[str, int] = {}
     for s in sessions:
-        created = s.get("createdAt")
+        created = s.get("created_at")
         if created:
             date_key = created.strftime("%Y-%m-%d") if isinstance(created, datetime) else str(created)[:10]
             heatmap_counts[date_key] = heatmap_counts.get(date_key, 0) + 1
@@ -95,8 +104,8 @@ async def get_tracker_dashboard(user=Depends(get_current_user)):
             "category": "Speaking",
             "icon": "🎤",
             "target": 1,
-            "current": len([s for s in sessions if str(s.get("createdAt", ""))[:10] == today_str]),
-            "completed": any(str(s.get("createdAt", ""))[:10] == today_str for s in sessions)
+            "current": len([s for s in sessions if str(s.get("created_at", ""))[:10] == today_str]),
+            "completed": any(str(s.get("created_at", ""))[:10] == today_str for s in sessions)
         },
         {
             "id": "goal_ai_news",
@@ -133,14 +142,14 @@ async def get_tracker_dashboard(user=Depends(get_current_user)):
         {"id": "first_words", "title": "First Spoken Words", "desc": "Completed your first speech practice session", "icon": "🌱", "unlocked": total_sessions_count >= 1},
         {"id": "streak_3", "title": "3-Day Consistency", "desc": "Kept a 3-day active practice streak", "icon": "🔥", "unlocked": longest_streak >= 3},
         {"id": "streak_7", "title": "7-Day Unstoppable", "desc": "Completed a full week streak", "icon": "⚡", "unlocked": longest_streak >= 7},
-        {"id": "fluent_speaker", "title": "Fluency Master", "desc": "Achieved a 9.0+ fluency rating in a session", "icon": "🏆", "unlocked": any(s.get("evaluation", {}).get("overallScore", 0) >= 9.0 for s in sessions)},
+        {"id": "fluent_speaker", "title": "Fluency Master", "desc": "Achieved a 9.0+ fluency rating in a session", "icon": "🏆", "unlocked": any(s.get("overall_score", 0) >= 9.0 for s in sessions)},
         {"id": "news_buff", "title": "AI Tech Pioneer", "desc": "Stayed updated with 20+ daily AI news updates", "icon": "🧠", "unlocked": True},
         {"id": "resume_pro", "title": "Career Ready", "desc": "Crafted an ATS-optimized CV with AI enhancements", "icon": "💼", "unlocked": True},
     ]
 
     # 6. Skill Radar & Metrics
     total_minutes = sum([s.get("duration", 0) for s in sessions]) // 60
-    avg_score = (sum([s.get("evaluation", {}).get("overallScore", 0) for s in sessions]) / len(sessions)) if sessions else 7.2
+    avg_score = (sum([s.get("overall_score", 0) for s in sessions]) / len(sessions)) if sessions else 7.2
 
     skill_radar = {
         "fluency": min(100, int(avg_score * 10 + 10)),

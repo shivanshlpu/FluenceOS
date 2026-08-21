@@ -9,15 +9,10 @@ app = FastAPI(
     description="AI-powered personal development platform"
 )
 
-# CORS — allow React frontend
+# CORS — allow all origins (Vercel, localhost, mobile PWA)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "https://your-vercel-app.vercel.app",
-        "*",
-    ],
+    allow_origin_regex=r".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
