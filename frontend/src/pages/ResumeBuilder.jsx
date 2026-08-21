@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import html2pdf from 'html2pdf.js';
 import { initialResumeData } from './resumeData';
 import { DynamicCVRenderer } from './DynamicCVRenderer';
-import { ChevronRight, ChevronLeft, Download, Save, Sparkles, Check, Loader, Edit3, Eye } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Download, Save, Sparkles, Check, Loader, Edit3, Eye, Plus, Trash2 } from 'lucide-react';
 import './ResumeBuilder.css';
 
 export const ResumeBuilder = () => {
@@ -36,7 +36,7 @@ export const ResumeBuilder = () => {
     return () => window.removeEventListener('resize', calculateScale);
   }, [mobileMode, cvType]);
 
-  // Pixel-Perfect Isolated A4 PDF Export (No scaling distortion, 300 DPI high-res)
+  // Clean Multi-Page Non-Slicing PDF Export Engine
   const handleExportPDF = async () => {
     const originalElement = document.getElementById('resume-a4-page');
     if (!originalElement) {
@@ -46,7 +46,7 @@ export const ResumeBuilder = () => {
 
     setIsExporting(true);
 
-    // Create an isolated unscaled clone off-screen
+    // Create an isolated unscaled clone off-screen with multi-page automatic flow
     const clone = originalElement.cloneNode(true);
     const container = document.createElement('div');
     container.id = 'pdf-render-isolated-container';
@@ -54,7 +54,7 @@ export const ResumeBuilder = () => {
     container.style.left = '-9999px';
     container.style.top = '0';
     container.style.width = '210mm';
-    container.style.minHeight = '297mm';
+    container.style.minHeight = 'auto';
     container.style.background = '#ffffff';
     container.style.color = '#111111';
     container.style.zIndex = '-9999';
@@ -62,10 +62,10 @@ export const ResumeBuilder = () => {
     container.style.padding = '0';
     container.style.transform = 'none';
 
-    // Ensure clone has standard unscaled 100% dimensions
+    // Ensure clone has standard unscaled dimensions and clean page-break rules
     clone.style.transform = 'none';
     clone.style.width = '210mm';
-    clone.style.minHeight = '297mm';
+    clone.style.minHeight = 'auto';
     clone.style.margin = '0 auto';
     clone.style.boxShadow = 'none';
     clone.style.boxSizing = 'border-box';
@@ -80,7 +80,7 @@ export const ResumeBuilder = () => {
 
       const fileName = `${(resumeData.header.fullName || 'Resume').trim().replace(/\s+/g, '_')}_Resume.pdf`;
       const opt = {
-        margin: [0, 0, 0, 0],
+        margin: [6, 0, 8, 0], // Clean 6mm top and 8mm bottom breathing margins on every page
         filename: fileName,
         image: { type: 'jpeg', quality: 1.0 },
         html2canvas: {
@@ -89,13 +89,28 @@ export const ResumeBuilder = () => {
           logging: false,
           scrollY: 0,
           scrollX: 0,
-          windowWidth: 794,
-          windowHeight: 1123
+          windowWidth: 794
         },
         jsPDF: {
           unit: 'mm',
           format: 'a4',
           orientation: 'portrait'
+        },
+        pagebreak: {
+          mode: ['avoid-all', 'css', 'legacy'],
+          avoid: [
+            '.ats-section-title',
+            '.ats-entry',
+            '.ats-edu-entry',
+            '.ats-single-line-entry',
+            '.ats-skill-line',
+            '.gen-title',
+            '.gen-entry',
+            '.exec-title',
+            '.exec-entry',
+            '.exec-edu-row',
+            'h1', 'h2', 'h3', 'header'
+          ]
         }
       };
 
@@ -121,7 +136,7 @@ export const ResumeBuilder = () => {
     }, 800);
   };
 
-  // Form Handlers
+  // --- Dynamic Handlers: Header ---
   const updateHeader = (field, value) => {
     setResumeData(prev => ({
       ...prev,
@@ -142,12 +157,68 @@ export const ResumeBuilder = () => {
     }));
   };
 
-  const updateSkill = (index, items) => {
+  // --- Dynamic Handlers: Skills ---
+  const updateSkillCategory = (index, field, value) => {
     const updated = [...resumeData.skills];
-    updated[index].items = items;
+    updated[index][field] = value;
     setResumeData(prev => ({ ...prev, skills: updated }));
   };
 
+  const addSkillCategory = () => {
+    setResumeData(prev => ({
+      ...prev,
+      skills: [...prev.skills, { category: "New Category", items: "Item 1, Item 2, Item 3" }]
+    }));
+  };
+
+  const removeSkillCategory = (index) => {
+    setResumeData(prev => ({
+      ...prev,
+      skills: prev.skills.filter((_, i) => i !== index)
+    }));
+  };
+
+  // --- Dynamic Handlers: Experience ---
+  const updateExperience = (index, field, value) => {
+    const updated = [...resumeData.experience];
+    updated[index][field] = value;
+    setResumeData(prev => ({ ...prev, experience: updated }));
+  };
+
+  const updateExperienceBullet = (expIdx, bIdx, value) => {
+    const updated = [...resumeData.experience];
+    updated[expIdx].bullets[bIdx] = value;
+    setResumeData(prev => ({ ...prev, experience: updated }));
+  };
+
+  const addExperience = () => {
+    setResumeData(prev => ({
+      ...prev,
+      experience: [
+        ...prev.experience,
+        {
+          role: "Software Engineer",
+          organization: "Company Name",
+          date: "Jan 2025 – Present",
+          tagUrl: "",
+          bullets: [
+            "Engineered scalable systems using modern software patterns.",
+            "Optimized pipeline performance and reduced latency by 35%.",
+            "Collaborated with cross-functional teams to deliver core modules."
+          ]
+        }
+      ]
+    }));
+  };
+
+  const removeExperience = (index) => {
+    setResumeData(prev => ({
+      ...prev,
+      experience: prev.experience.filter((_, i) => i !== index)
+    }));
+  };
+
+  // --- Dynamic Handlers: Projects ---
   const updateProject = (index, field, value) => {
     const updated = [...resumeData.projects];
     updated[index][field] = value;
@@ -167,14 +238,14 @@ export const ResumeBuilder = () => {
         ...prev.projects,
         {
           title: "New Project",
-          descriptor: "Full-Stack Web App",
+          descriptor: "Full-Stack Web Application",
           githubUrl: "https://github.com/",
           liveUrl: "",
           date: "Jan 2026 – Present",
           bullets: [
-            "Architected system using modern frameworks to improve performance.",
-            "Engineered core features and optimized backend pipelines.",
-            "Delivered responsive user interface with automated testing."
+            "Architected full-stack system using modern frameworks for high performance.",
+            "Engineered core modules and optimized backend data pipelines.",
+            "Delivered responsive user interface with automated unit testing."
           ],
           techStack: "React.js, Node.js, PostgreSQL"
         }
@@ -186,6 +257,59 @@ export const ResumeBuilder = () => {
     setResumeData(prev => ({
       ...prev,
       projects: prev.projects.filter((_, i) => i !== index)
+    }));
+  };
+
+  // --- Dynamic Handlers: Training & Certs ---
+  const updateCertification = (index, field, value) => {
+    const updated = [...resumeData.certifications];
+    updated[index][field] = value;
+    setResumeData(prev => ({ ...prev, certifications: updated }));
+  };
+
+  const addCertification = () => {
+    setResumeData(prev => ({
+      ...prev,
+      certifications: [
+        ...prev.certifications,
+        { name: "New Certification", issuer: "Issuing Body", date: "2026", url: "" }
+      ]
+    }));
+  };
+
+  const removeCertification = (index) => {
+    setResumeData(prev => ({
+      ...prev,
+      certifications: prev.certifications.filter((_, i) => i !== index)
+    }));
+  };
+
+  // --- Dynamic Handlers: Education ---
+  const updateEducation = (index, field, value) => {
+    const updated = [...resumeData.education];
+    updated[index][field] = value;
+    setResumeData(prev => ({ ...prev, education: updated }));
+  };
+
+  const addEducation = () => {
+    setResumeData(prev => ({
+      ...prev,
+      education: [
+        ...prev.education,
+        {
+          institution: "University Name",
+          location: "City, Country",
+          degree: "Bachelor of Technology in Computer Science",
+          date: "2023 – 2027"
+        }
+      ]
+    }));
+  };
+
+  const removeEducation = (index) => {
+    setResumeData(prev => ({
+      ...prev,
+      education: prev.education.filter((_, i) => i !== index)
     }));
   };
 
@@ -243,7 +367,7 @@ export const ResumeBuilder = () => {
           </div>
         </div>
 
-        {/* Archetype Template Selector (All 3 Options 100% Visible) */}
+        {/* Archetype Template Selector */}
         <div className="archetype-grid-selector">
           <button
             type="button"
@@ -289,7 +413,7 @@ export const ResumeBuilder = () => {
         {/* LEFT COLUMN: FORM CONTROLS */}
         <div className={`form-column-container ${mobileMode === 'preview' ? 'hide-on-mobile' : ''}`}>
           
-          {/* Responsive 6-Step Grid Selector (All 6 Steps 100% Visible & Tapable) */}
+          {/* Responsive 6-Step Grid Selector */}
           <div className="steps-grid-selector">
             {steps.map((s) => (
               <button
@@ -387,7 +511,6 @@ export const ResumeBuilder = () => {
                 />
               </div>
 
-              {/* Step Navigation Actions */}
               <div className="step-footer-actions">
                 <button type="button" className="btn-step-next" onClick={goToNextStep}>
                   Next: Skills Summary <ChevronRight size={16} />
@@ -399,15 +522,35 @@ export const ResumeBuilder = () => {
           {/* STEP 2: SKILLS SUMMARY */}
           {activeStep === 'skills' && (
             <div className="section-card">
-              <h3 className="section-card-title">Skills Summary</h3>
-              <p className="card-hint">List comma-separated items per category according to the rulebook.</p>
+              <div className="card-top-header">
+                <h3 className="section-card-title">Skills Summary ({resumeData.skills.length})</h3>
+                <button type="button" className="btn-add-item" onClick={addSkillCategory}>
+                  <Plus size={13} /> Add Category
+                </button>
+              </div>
+              <p className="card-hint">List comma-separated technical items per category according to ATS rules.</p>
+              
               {resumeData.skills.map((s, idx) => (
-                <div key={idx} className="form-field" style={{ marginBottom: '10px' }}>
-                  <label><strong>{s.category}</strong></label>
+                <div key={idx} className="nested-item-card">
+                  <div className="item-card-header">
+                    <input
+                      type="text"
+                      className="category-title-input"
+                      value={s.category}
+                      placeholder="Category Name (e.g. Languages)"
+                      onChange={e => updateSkillCategory(idx, 'category', e.target.value)}
+                    />
+                    {resumeData.skills.length > 1 && (
+                      <button type="button" className="btn-delete" onClick={() => removeSkillCategory(idx)}>
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={s.items}
-                    onChange={e => updateSkill(idx, e.target.value)}
+                    placeholder="e.g. Java, Python, C++, TypeScript..."
+                    onChange={e => updateSkillCategory(idx, 'items', e.target.value)}
                   />
                 </div>
               ))}
@@ -426,20 +569,31 @@ export const ResumeBuilder = () => {
           {/* STEP 3: WORK EXPERIENCE */}
           {activeStep === 'experience' && (
             <div className="section-card">
-              <h3 className="section-card-title">Work Experience</h3>
+              <div className="card-top-header">
+                <h3 className="section-card-title">Work Experience ({resumeData.experience.length})</h3>
+                <button type="button" className="btn-add-item" onClick={addExperience}>
+                  <Plus size={13} /> Add Experience
+                </button>
+              </div>
+
               {resumeData.experience.map((exp, idx) => (
                 <div key={idx} className="nested-item-card">
+                  <div className="item-card-header">
+                    <span className="item-badge">Experience #{idx + 1}</span>
+                    {resumeData.experience.length > 0 && (
+                      <button type="button" className="btn-delete" onClick={() => removeExperience(idx)}>
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+
                   <div className="form-grid-2">
                     <div className="form-field">
                       <label>Job Role / Title</label>
                       <input
                         type="text"
                         value={exp.role}
-                        onChange={e => {
-                          const upd = [...resumeData.experience];
-                          upd[idx].role = e.target.value;
-                          setResumeData(prev => ({ ...prev, experience: upd }));
-                        }}
+                        onChange={e => updateExperience(idx, 'role', e.target.value)}
                       />
                     </div>
                     <div className="form-field">
@@ -447,23 +601,15 @@ export const ResumeBuilder = () => {
                       <input
                         type="text"
                         value={exp.organization}
-                        onChange={e => {
-                          const upd = [...resumeData.experience];
-                          upd[idx].organization = e.target.value;
-                          setResumeData(prev => ({ ...prev, experience: upd }));
-                        }}
+                        onChange={e => updateExperience(idx, 'organization', e.target.value)}
                       />
                     </div>
                     <div className="form-field">
-                      <label>Date Range (e.g. Aug 2025 or Aug 2024 – Present)</label>
+                      <label>Date Range (e.g. Aug 2024 – Present)</label>
                       <input
                         type="text"
                         value={exp.date}
-                        onChange={e => {
-                          const upd = [...resumeData.experience];
-                          upd[idx].date = e.target.value;
-                          setResumeData(prev => ({ ...prev, experience: upd }));
-                        }}
+                        onChange={e => updateExperience(idx, 'date', e.target.value)}
                       />
                     </div>
                     <div className="form-field">
@@ -472,11 +618,7 @@ export const ResumeBuilder = () => {
                         type="text"
                         placeholder="https://certificate-url..."
                         value={exp.tagUrl || ''}
-                        onChange={e => {
-                          const upd = [...resumeData.experience];
-                          upd[idx].tagUrl = e.target.value;
-                          setResumeData(prev => ({ ...prev, experience: upd }));
-                        }}
+                        onChange={e => updateExperience(idx, 'tagUrl', e.target.value)}
                       />
                     </div>
                   </div>
@@ -489,11 +631,7 @@ export const ResumeBuilder = () => {
                         rows={2}
                         value={b}
                         placeholder={`Bullet ${bIdx + 1}`}
-                        onChange={e => {
-                          const upd = [...resumeData.experience];
-                          upd[idx].bullets[bIdx] = e.target.value;
-                          setResumeData(prev => ({ ...prev, experience: upd }));
-                        }}
+                        onChange={e => updateExperienceBullet(idx, bIdx, e.target.value)}
                       />
                     ))}
                   </div>
@@ -517,7 +655,7 @@ export const ResumeBuilder = () => {
               <div className="card-top-header">
                 <h3 className="section-card-title">Projects ({resumeData.projects.length})</h3>
                 <button type="button" className="btn-add-item" onClick={addProject}>
-                  + Add Project
+                  <Plus size={13} /> Add Project
                 </button>
               </div>
 
@@ -527,7 +665,7 @@ export const ResumeBuilder = () => {
                     <span className="item-badge">Project #{idx + 1}</span>
                     {resumeData.projects.length > 1 && (
                       <button type="button" className="btn-delete" onClick={() => removeProject(idx)}>
-                        ✕ Remove
+                        <Trash2 size={13} />
                       </button>
                     )}
                   </div>
@@ -617,34 +755,45 @@ export const ResumeBuilder = () => {
           {/* STEP 5: TRAINING & CERTIFICATIONS */}
           {activeStep === 'training' && (
             <div className="section-card">
-              <h3 className="section-card-title">Certifications & Training</h3>
-              <div className="nested-item-card">
-                <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: '#c4c0e0' }}>Certifications</h4>
-                {resumeData.certifications.map((c, idx) => (
-                  <div key={idx} className="form-grid-2" style={{ marginBottom: '8px' }}>
-                    <input
-                      type="text"
-                      placeholder="Certificate Name"
-                      value={c.name}
-                      onChange={e => {
-                        const upd = [...resumeData.certifications];
-                        upd[idx].name = e.target.value;
-                        setResumeData(prev => ({ ...prev, certifications: upd }));
-                      }}
-                    />
-                    <input
-                      type="text"
-                      placeholder="Issuer (e.g. Postman, NPTEL)"
-                      value={c.issuer}
-                      onChange={e => {
-                        const upd = [...resumeData.certifications];
-                        upd[idx].issuer = e.target.value;
-                        setResumeData(prev => ({ ...prev, certifications: upd }));
-                      }}
-                    />
-                  </div>
-                ))}
+              <div className="card-top-header">
+                <h3 className="section-card-title">Certifications ({resumeData.certifications.length})</h3>
+                <button type="button" className="btn-add-item" onClick={addCertification}>
+                  <Plus size={13} /> Add Certification
+                </button>
               </div>
+
+              {resumeData.certifications.map((c, idx) => (
+                <div key={idx} className="nested-item-card">
+                  <div className="item-card-header">
+                    <span className="item-badge">Certification #{idx + 1}</span>
+                    {resumeData.certifications.length > 1 && (
+                      <button type="button" className="btn-delete" onClick={() => removeCertification(idx)}>
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="form-grid-2">
+                    <div className="form-field">
+                      <label>Certificate Name</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Postman API Fundamentals"
+                        value={c.name}
+                        onChange={e => updateCertification(idx, 'name', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label>Issuer & Date</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Postman | Jan 2026"
+                        value={c.issuer}
+                        onChange={e => updateCertification(idx, 'issuer', e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
 
               <div className="step-footer-actions">
                 <button type="button" className="btn-step-prev" onClick={goToPrevStep}>
@@ -660,20 +809,31 @@ export const ResumeBuilder = () => {
           {/* STEP 6: EDUCATION */}
           {activeStep === 'education' && (
             <div className="section-card">
-              <h3 className="section-card-title">Education</h3>
+              <div className="card-top-header">
+                <h3 className="section-card-title">Education ({resumeData.education.length})</h3>
+                <button type="button" className="btn-add-item" onClick={addEducation}>
+                  <Plus size={13} /> Add Education
+                </button>
+              </div>
+
               {resumeData.education.map((edu, idx) => (
                 <div key={idx} className="nested-item-card">
+                  <div className="item-card-header">
+                    <span className="item-badge">Education #{idx + 1}</span>
+                    {resumeData.education.length > 1 && (
+                      <button type="button" className="btn-delete" onClick={() => removeEducation(idx)}>
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+
                   <div className="form-grid-2">
                     <div className="form-field">
                       <label>College / University / School</label>
                       <input
                         type="text"
                         value={edu.institution}
-                        onChange={e => {
-                          const upd = [...resumeData.education];
-                          upd[idx].institution = e.target.value;
-                          setResumeData(prev => ({ ...prev, education: upd }));
-                        }}
+                        onChange={e => updateEducation(idx, 'institution', e.target.value)}
                       />
                     </div>
                     <div className="form-field">
@@ -681,11 +841,7 @@ export const ResumeBuilder = () => {
                       <input
                         type="text"
                         value={edu.location}
-                        onChange={e => {
-                          const upd = [...resumeData.education];
-                          upd[idx].location = e.target.value;
-                          setResumeData(prev => ({ ...prev, education: upd }));
-                        }}
+                        onChange={e => updateEducation(idx, 'location', e.target.value)}
                       />
                     </div>
                     <div className="form-field">
@@ -693,11 +849,7 @@ export const ResumeBuilder = () => {
                       <input
                         type="text"
                         value={edu.degree}
-                        onChange={e => {
-                          const upd = [...resumeData.education];
-                          upd[idx].degree = e.target.value;
-                          setResumeData(prev => ({ ...prev, education: upd }));
-                        }}
+                        onChange={e => updateEducation(idx, 'degree', e.target.value)}
                       />
                     </div>
                     <div className="form-field">
@@ -705,11 +857,7 @@ export const ResumeBuilder = () => {
                       <input
                         type="text"
                         value={edu.date}
-                        onChange={e => {
-                          const upd = [...resumeData.education];
-                          upd[idx].date = e.target.value;
-                          setResumeData(prev => ({ ...prev, education: upd }));
-                        }}
+                        onChange={e => updateEducation(idx, 'date', e.target.value)}
                       />
                     </div>
                   </div>

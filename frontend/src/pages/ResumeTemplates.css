@@ -1,6 +1,6 @@
 /* =========================================================
    A4 PRINT & SCREEN TEMPLATE STYLES
-   All templates adhere to standard A4 (210mm x 297mm)
+   Adheres to standard A4 (210mm width) with clean multi-page flow
    ========================================================= */
 
 /* Common A4 Base */
@@ -9,12 +9,34 @@
 .executive-cv-page {
   width: 210mm;
   min-height: 297mm;
-  padding: 14mm 16mm;
+  padding: 12mm 16mm;
   background-color: #ffffff;
   color: #111111;
   box-sizing: border-box;
   margin: 0 auto;
   text-align: left;
+}
+
+/* Page Break & Anti-Text-Slicing Guards */
+.ats-section-title,
+.gen-title,
+.exec-title {
+  break-after: avoid !important;
+  page-break-after: avoid !important;
+}
+
+.ats-header,
+.gen-header,
+.exec-header,
+.ats-entry,
+.ats-edu-entry,
+.ats-single-line-entry,
+.ats-skill-line,
+.gen-entry,
+.exec-entry,
+.exec-edu-row {
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
 }
 
 /* =========================================================
@@ -304,7 +326,7 @@
 @media print {
   @page {
     size: A4 portrait;
-    margin: 0;
+    margin: 8mm 10mm;
   }
   body {
     background: transparent !important;
@@ -315,9 +337,9 @@
   .general-cv-page,
   .executive-cv-page {
     width: 100% !important;
-    min-height: 100% !important;
+    min-height: auto !important;
     margin: 0 !important;
-    padding: 12mm 15mm !important;
+    padding: 4mm 6mm !important;
     box-shadow: none !important;
   }
 }
