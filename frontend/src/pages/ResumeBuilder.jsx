@@ -36,28 +36,61 @@ export const ResumeBuilder = () => {
     return () => window.removeEventListener('resize', calculateScale);
   }, [mobileMode, cvType]);
 
-  // Clean PDF Export using html2pdf.js targeting ONLY the A4 resume sheet
+  // Pixel-Perfect Isolated A4 PDF Export (No scaling distortion, 300 DPI high-res)
   const handleExportPDF = async () => {
-    const element = document.getElementById('resume-a4-page');
-    if (!element) {
+    const originalElement = document.getElementById('resume-a4-page');
+    if (!originalElement) {
       window.print();
       return;
     }
 
     setIsExporting(true);
 
+    // Create an isolated unscaled clone off-screen
+    const clone = originalElement.cloneNode(true);
+    const container = document.createElement('div');
+    container.id = 'pdf-render-isolated-container';
+    container.style.position = 'fixed';
+    container.style.left = '-9999px';
+    container.style.top = '0';
+    container.style.width = '210mm';
+    container.style.minHeight = '297mm';
+    container.style.background = '#ffffff';
+    container.style.color = '#111111';
+    container.style.zIndex = '-9999';
+    container.style.margin = '0';
+    container.style.padding = '0';
+    container.style.transform = 'none';
+
+    // Ensure clone has standard unscaled 100% dimensions
+    clone.style.transform = 'none';
+    clone.style.width = '210mm';
+    clone.style.minHeight = '297mm';
+    clone.style.margin = '0 auto';
+    clone.style.boxShadow = 'none';
+    clone.style.boxSizing = 'border-box';
+
+    container.appendChild(clone);
+    document.body.appendChild(container);
+
     try {
-      const fileName = `${(resumeData.header.fullName || 'Resume').trim().replace(/\s+/g, '_')}_CV.pdf`;
+      if (document.fonts && document.fonts.ready) {
+        await document.fonts.ready;
+      }
+
+      const fileName = `${(resumeData.header.fullName || 'Resume').trim().replace(/\s+/g, '_')}_Resume.pdf`;
       const opt = {
         margin: [0, 0, 0, 0],
         filename: fileName,
-        image: { type: 'jpeg', quality: 0.98 },
+        image: { type: 'jpeg', quality: 1.0 },
         html2canvas: {
-          scale: 2,
+          scale: 3, // Ultra-sharp 300 DPI text & layout
           useCORS: true,
           logging: false,
           scrollY: 0,
-          scrollX: 0
+          scrollX: 0,
+          windowWidth: 794,
+          windowHeight: 1123
         },
         jsPDF: {
           unit: 'mm',
@@ -66,11 +99,14 @@ export const ResumeBuilder = () => {
         }
       };
 
-      await html2pdf().set(opt).from(element).save();
+      await html2pdf().set(opt).from(clone).save();
     } catch (err) {
-      console.warn('html2pdf export failed, falling back to print:', err);
+      console.warn('Isolated PDF export error, falling back to print:', err);
       window.print();
     } finally {
+      if (container && container.parentNode) {
+        container.parentNode.removeChild(container);
+      }
       setIsExporting(false);
     }
   };
