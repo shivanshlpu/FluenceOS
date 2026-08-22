@@ -36,7 +36,15 @@ export default function Dashboard() {
             .then(data => setStats(data))
             .catch(() => setStats(null))
             .finally(() => setLoadingStats(false));
+
+        // Auto-log daily visit for streak tracking
+        pythonAPI.post('/api/tracker/log-activity', {
+            activityType: 'checkin',
+            durationMinutes: 5,
+            title: 'Daily Growth Visit'
+        }).catch(() => {});
     }, []);
+
 
     const statCards = [
         {

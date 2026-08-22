@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, Query
 from app.services.news_service import get_all_news, get_available_periods
-from app.services.ai_service import generate_roadmap_content
+from app.services.ai_service import generate_roadmap_content, expand_news_article
 from app.services.auth_service import get_current_user
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 router = APIRouter()
 
@@ -11,6 +11,13 @@ router = APIRouter()
 class RoadmapRequest(BaseModel):
     skill: str
     level: str = "Beginner"
+
+
+class ExpandNewsRequest(BaseModel):
+    title: str
+    summary: str
+    source: Optional[str] = ""
+    category: Optional[str] = "AI Tech"
 
 
 @router.get("/periods")
@@ -40,6 +47,21 @@ async def get_news(
     return {"articles": articles, "total": len(articles), "period": period, "type": type}
 
 
+@router.post("/news/expand")
+async def expand_news(data: ExpandNewsRequest, user=Depends(get_current_user)):
+    """
+    POST /api/knowledge/news/expand
+    Expands a short news brief into a full-length, structured multi-paragraph deep-dive report.
+    """
+    expanded = await expand_news_article(
+        title=data.title,
+        summary=data.summary,
+        source=data.source or "",
+        category=data.category or "AI Tech"
+    )
+    return expanded
+
+
 @router.get("/trends")
 async def get_trends(period: Optional[str] = None, user=Depends(get_current_user)):
     """GET /api/knowledge/trends — Trending topics"""
@@ -60,3 +82,4 @@ async def generate_roadmap(data: RoadmapRequest, user=Depends(get_current_user))
     """POST /api/knowledge/roadmap/generate — AI-generated learning roadmap"""
     roadmap = await generate_roadmap_content(data.skill, data.level)
     return roadmap
+

@@ -124,7 +124,6 @@ async def evaluate_speech(transcript: str, topic: str) -> dict:
 
     try:
         # Parse JSON from AI response
-        # Sometimes AI wraps in markdown code block
         clean = result.strip()
         if clean.startswith("```"):
             clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
@@ -639,10 +638,10 @@ async def enhance_cv_bullet(bullet: str, role: str = "", target_job: str = "") -
         return json.loads(clean)
     except Exception:
         return {
-            "enhancedBullet": f"Architected and deployed high-performance solutions, boosting system efficiency by 35% and streamlining core operations.",
+            "enhancedBullet": "Architected and deployed high-performance solutions, boosting system efficiency by 35% and streamlining core operations.",
             "alternativeOptions": [
-                f"Led cross-functional initiatives to optimize workflows, reducing delivery cycle time by 25%.",
-                f"Engineered scalable infrastructure supporting high-volume traffic with 99.9% uptime."
+                "Led cross-functional initiatives to optimize workflows, reducing delivery cycle time by 25%.",
+                "Engineered scalable infrastructure supporting high-volume traffic with 99.9% uptime."
             ],
             "actionVerbsUsed": ["Architected", "Engineered"],
             "atsKeywords": ["Optimization", "Scalability"]
@@ -690,3 +689,75 @@ async def calculate_ats_match(cv_text: str, job_description: str) -> dict:
             "keyStrengths": ["Well-structured layout"],
             "criticalImprovements": ["Add more quantified accomplishments (% and numbers)"]
         }
+
+
+async def expand_news_article(title: str, summary: str, source: str = "", category: str = "AI Tech") -> dict:
+    """
+    Expands a short news snippet into a comprehensive, multi-paragraph in-depth article.
+    """
+    prompt = f"""
+    Write a detailed, high-quality, multi-paragraph journalistic report and deep-dive analysis based on this news brief:
+
+    HEADLINE: {title}
+    BRIEF / SUMMARY: {summary}
+    CATEGORY: {category}
+    SOURCE: {source or 'Tech Intelligence'}
+
+    Generate a thorough story with rich, well-written paragraphs structured as follows. Return ONLY valid JSON:
+    {{
+      "headline": "{title}",
+      "executiveSummary": "A concise, engaging 2-3 sentence overview highlighting the essence of the news.",
+      "backgroundContext": "A full paragraph detailing the historical context, previous industry state, and the problem this development addresses.",
+      "coreBreakthrough": "A comprehensive paragraph explaining exactly what was built, announced, or discovered, including key numbers, architectures, or releases.",
+      "technicalDeepDive": "A detailed technical paragraph examining how the technology or system operates, implementation details, benchmarks, or models involved.",
+      "industryImpact": "A full paragraph analyzing the strategic and economic impact on developers, enterprises, competitors, and the broader tech ecosystem.",
+      "keyTakeaways": [
+        "Key takeaway bullet 1",
+        "Key takeaway bullet 2",
+        "Key takeaway bullet 3"
+      ],
+      "paragraphs": [
+        "Paragraph 1 (Executive Summary)",
+        "Paragraph 2 (Context & Background)",
+        "Paragraph 3 (Core Details & Breakthroughs)",
+        "Paragraph 4 (Technical Deep Dive)",
+        "Paragraph 5 (Market & Future Outlook)"
+      ]
+    }}
+    """
+    system = "You are a senior tech journalist and AI research analyst. Write professional, in-depth, multi-paragraph reports. Return only valid JSON."
+    result = await generate_ai_response(prompt, system)
+
+    try:
+        clean = result.strip()
+        if clean.startswith("```"):
+            clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
+            clean = clean.rsplit("```", 1)[0]
+        parsed = json.loads(clean)
+        if isinstance(parsed, dict) and "paragraphs" in parsed:
+            return parsed
+    except Exception as e:
+        print(f"[WARNING] expand_news_article fallback due to: {e}")
+
+    # Fallback rich paragraphs if AI response parsing fails
+    clean_summary = summary.strip() if summary else title
+    return {
+        "headline": title,
+        "executiveSummary": clean_summary,
+        "backgroundContext": f"The rapid acceleration of {category} has spurred intense development across the sector, prompting organizations worldwide to rethink architectures and engineering practices.",
+        "coreBreakthrough": f"According to reports from {source or 'industry updates'}, {title}. This development represents a significant step forward in the adoption and practical deployment of modern AI technologies.",
+        "technicalDeepDive": f"Key technical attributes focus on optimizing throughput, minimizing inference overhead, and ensuring seamless integration with existing software engineering ecosystems.",
+        "industryImpact": "Looking ahead, this milestone is expected to drive higher developer velocity and establish new benchmarks for upcoming product cycles across the ecosystem.",
+        "keyTakeaways": [
+            "Significant progress in scalable AI engineering and deployment.",
+            "Measurable improvements in developer productivity and operational efficiency.",
+            "Anticipated broader ecosystem adoption over the coming quarters."
+        ],
+        "paragraphs": [
+            clean_summary,
+            f"The rapid acceleration of {category} has spurred intense development across the sector, prompting organizations worldwide to rethink architectures and engineering practices.",
+            f"According to reports from {source or 'industry updates'}, {title}. This development represents a significant step forward in practical deployment.",
+            "Key technical attributes focus on optimizing throughput, minimizing latency, and ensuring seamless integration across enterprise stacks.",
+            "Looking ahead, this milestone is expected to drive higher developer velocity and establish new benchmarks for upcoming industry roadmaps."
+        ]
+    }

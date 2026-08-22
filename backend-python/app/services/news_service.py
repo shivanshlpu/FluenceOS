@@ -31,11 +31,50 @@ RSS_FEEDS = {
 }
 
 
+import re
+import html
+
+def clean_html_to_paragraphs(raw_text: str) -> str:
+    """Cleans raw HTML into well-structured paragraphs with clear line breaks."""
+    if not raw_text:
+        return ""
+    text = html.unescape(raw_text)
+    # Replace block tags with paragraph breaks
+    text = re.sub(r'<(?:p|div|br|li|h[1-6]|tr|blockquote)[^>]*>', '\n\n', text, flags=re.IGNORECASE)
+    # Remove all remaining HTML tags
+    text = re.sub(r'<[^>]+>', ' ', text)
+    # Clean whitespace per paragraph
+    raw_paras = [re.sub(r'[ \t]+', ' ', p).strip() for p in text.split('\n\n') if p.strip()]
+    if not raw_paras:
+        return text.strip()
+    return '\n\n'.join(raw_paras)
+
+
+def extract_paragraphs(text: str) -> List[str]:
+    """Splits cleaned text into separate readable paragraphs."""
+    if not text:
+        return []
+    paras = [p.strip() for p in text.split('\n\n') if len(p.strip()) > 0]
+    return paras if paras else [text.strip()]
+
+
+def extract_tags(text: str) -> list:
+    tag_keywords = {
+        "GPT": "OpenAI", "Claude": "Anthropic", "Gemini": "Google",
+        "DeepSeek": "DeepSeek", "Llama": "Meta", "startup": "Startup",
+        "funding": "Investment", "agent": "AI Agents", "Python": "Python",
+        "React": "React", "machine learning": "ML", "robot": "Robotics",
+        "Nvidia": "NVIDIA", "OpenAI": "OpenAI", "Anthropic": "Anthropic",
+    }
+    return list({v for k, v in tag_keywords.items() if k.lower() in text.lower()})[:5]
+
+
 def _get_from_mem_cache(key: str) -> Optional[Any]:
     entry = _MEM_CACHE.get(key)
     if entry and datetime.utcnow() - entry["timestamp"] < _MEM_CACHE_TTL:
         return entry["data"]
     return None
+
 
 
 def _set_mem_cache(key: str, data: Any):
@@ -127,13 +166,17 @@ async def fetch_datacube_news(category_type: str = "tech", period_id: Optional[s
                 elif isinstance(data, list):
                     articles = data
 
-                # Format articles cleanly
+                # Format articles cleanly with proper paragraph parsing
                 formatted = []
                 for item in articles:
+                    raw_summary = item.get("content") or item.get("summary") or ""
+                    cleaned_summary = clean_html_to_paragraphs(raw_summary)
+                    paras = extract_paragraphs(cleaned_summary)
                     formatted.append({
                         "id": item.get("id"),
                         "title": item.get("author", {}).get("name") if item.get("author") else (item.get("title") or "AI Update"),
-                        "summary": item.get("content") or item.get("summary") or "",
+                        "summary": cleaned_summary,
+                        "paragraphs": paras,
                         "category": item.get("category") or category_type.capitalize(),
                         "tags": item.get("tags") or [],
                         "impact": item.get("impact", "medium"),
@@ -157,25 +200,36 @@ async def fetch_datacube_news(category_type: str = "tech", period_id: Optional[s
 
 
 async def fetch_rss_feed(url: str, category: str) -> list:
-    """Fetch and parse a single RSS feed as fallback"""
+    """Fetch and parse a single RSS feed as fallback with full paragraph extraction"""
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             response = await client.get(url, follow_redirects=True)
             feed = feedparser.parse(response.text)
 
             articles = []
-            for entry in feed.entries[:5]:
+            for entry in feed.entries[:8]:
+                # Grab content / summary / description
+                raw_content = ""
+                if "content" in entry and entry.content:
+                    raw_content = entry.content[0].get("value", "")
+                if not raw_content:
+                    raw_content = entry.get("summary", "") or entry.get("description", "")
+
+                cleaned_summary = clean_html_to_paragraphs(raw_content)
+                paras = extract_paragraphs(cleaned_summary)
+
                 articles.append({
                     "id": entry.get("id", entry.get("link", "")),
-                    "title": entry.get("title", "AI News"),
-                    "summary": entry.get("summary", "")[:350],
+                    "title": entry.get("title", "AI News Update"),
+                    "summary": cleaned_summary,
+                    "paragraphs": paras,
                     "url": entry.get("link", ""),
                     "sourceUrl": entry.get("link", ""),
                     "source": feed.feed.get("title", "Tech Feed"),
                     "publishedAt": entry.get("published", str(datetime.utcnow().strftime("%Y-%m-%d"))),
                     "category": category,
                     "impact": "medium",
-                    "tags": extract_tags(entry.get("title", "") + " " + entry.get("summary", "")),
+                    "tags": extract_tags(entry.get("title", "") + " " + cleaned_summary),
                     "isVideo": False,
                 })
             return articles
@@ -184,14 +238,6 @@ async def fetch_rss_feed(url: str, category: str) -> list:
         return []
 
 
-def extract_tags(text: str) -> list:
-    tag_keywords = {
-        "GPT": "OpenAI", "Claude": "Anthropic", "Gemini": "Google",
-        "DeepSeek": "DeepSeek", "Llama": "Meta", "startup": "Startup",
-        "funding": "Investment", "agent": "AI Agents", "Python": "Python",
-        "React": "React", "machine learning": "ML", "robot": "Robotics",
-    }
-    return list({v for k, v in tag_keywords.items() if k.lower() in text.lower()})[:5]
 
 
 async def get_all_news(category_type: str = "tech", period_id: Optional[str] = None, lang: str = "en") -> List[Dict[str, Any]]:

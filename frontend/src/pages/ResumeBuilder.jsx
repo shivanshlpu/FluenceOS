@@ -1,43 +1,133 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import html2pdf from 'html2pdf.js';
 import { initialResumeData } from './resumeData';
 import { DynamicCVRenderer } from './DynamicCVRenderer';
-import { ChevronRight, ChevronLeft, Download, Save, Sparkles, Check, Loader, Edit3, Eye, Plus, Trash2 } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Download, Save, Sparkles, Check, Loader, Edit3, Eye, Plus, Trash2, RotateCcw, CloudCheck, CheckCheck } from 'lucide-react';
+import { pythonAPI } from '../services/api';
 import './ResumeBuilder.css';
 
+const CV_STORAGE_KEY = 'fluence_cv_data_v2';
+const CV_META_KEY = 'fluence_cv_meta_v2';
+
+const getInitialResumeData = () => {
+  try {
+    const saved = localStorage.getItem(CV_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && parsed.header && parsed.skills) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load CV from localStorage:', e);
+  }
+  return initialResumeData;
+};
+
+const getInitialMeta = () => {
+  try {
+    const saved = localStorage.getItem(CV_META_KEY);
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (e) {}
+  return { cvType: 'specialized', activeStep: 'personal', jobDescription: '' };
+};
+
 export const ResumeBuilder = () => {
-  const [resumeData, setResumeData] = useState(initialResumeData);
-  const [cvType, setCvType] = useState('specialized'); // 'specialized' | 'general' | 'executive'
-  const [activeStep, setActiveStep] = useState('personal'); // 'personal' | 'skills' | 'experience' | 'projects' | 'training' | 'education'
+  const initialMeta = getInitialMeta();
+  const [resumeData, setResumeData] = useState(getInitialResumeData);
+  const [cvType, setCvType] = useState(initialMeta.cvType || 'specialized'); // 'specialized' | 'general' | 'executive'
+  const [activeStep, setActiveStep] = useState(initialMeta.activeStep || 'personal'); // 'personal' | 'skills' | 'experience' | 'projects' | 'training' | 'education'
   const [mobileMode, setMobileMode] = useState('edit'); // 'edit' | 'preview'
   const [scale, setScale] = useState(1);
   const [atsScore, setAtsScore] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [jobDescription, setJobDescription] = useState('');
+  const [jobDescription, setJobDescription] = useState(initialMeta.jobDescription || '');
+  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'saving' | 'synced'
 
   const previewWrapperRef = useRef(null);
 
-  // Auto-fit A4 preview on mobile screens
+  // Persistence effect: Auto-save to localStorage & debounced sync to backend
   useEffect(() => {
-    const calculateScale = () => {
-      if (previewWrapperRef.current) {
-        const availableWidth = previewWrapperRef.current.offsetWidth - 20;
-        const a4WidthPx = 794; // 210mm @ 96dpi
-        if (availableWidth < a4WidthPx && availableWidth > 0) {
-          setScale(availableWidth / a4WidthPx);
-        } else {
-          setScale(1);
-        }
+    try {
+      localStorage.setItem(CV_STORAGE_KEY, JSON.stringify(resumeData));
+      localStorage.setItem(CV_META_KEY, JSON.stringify({ cvType, activeStep, jobDescription }));
+    } catch (e) {
+      console.warn('LocalStorage save failed:', e);
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setSaveStatus('saving');
+        await pythonAPI.post('/api/cv/save', {
+          cvData: resumeData,
+          title: resumeData.header?.fullName ? `${resumeData.header.fullName}'s Resume` : 'My Resume'
+        });
+        // Auto-log activity to tracker for streak
+        pythonAPI.post('/api/tracker/log-activity', {
+          activityType: 'cv',
+          durationMinutes: 5,
+          title: 'Refined ATS CV'
+        }).catch(() => {});
+        setSaveStatus('synced');
+      } catch (err) {
+        setSaveStatus('saved');
       }
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [resumeData, cvType, activeStep, jobDescription]);
+
+  // Load cloud CV on mount if no local edits exist
+  useEffect(() => {
+    const fetchCloudCV = async () => {
+      try {
+        const localSaved = localStorage.getItem(CV_STORAGE_KEY);
+        if (!localSaved) {
+          const res = await pythonAPI.get('/api/cv/my-cv');
+          if (res && res.cv && res.cv.header) {
+            setResumeData(res.cv);
+          }
+        }
+      } catch (err) {}
     };
-    calculateScale();
-    window.addEventListener('resize', calculateScale);
-    return () => window.removeEventListener('resize', calculateScale);
-  }, [mobileMode, cvType]);
+    fetchCloudCV();
+  }, []);
+
+  const handleManualSave = async () => {
+    try {
+      setSaveStatus('saving');
+      localStorage.setItem(CV_STORAGE_KEY, JSON.stringify(resumeData));
+      await pythonAPI.post('/api/cv/save', {
+        cvData: resumeData,
+        title: resumeData.header?.fullName ? `${resumeData.header.fullName}'s Resume` : 'My Resume'
+      });
+      await pythonAPI.post('/api/tracker/log-activity', {
+        activityType: 'cv',
+        durationMinutes: 5,
+        title: 'Saved ATS Resume'
+      }).catch(() => {});
+      setSaveStatus('synced');
+      setTimeout(() => setSaveStatus('saved'), 2500);
+    } catch (err) {
+      setSaveStatus('saved');
+    }
+  };
+
+  const handleResetToDefault = () => {
+    if (window.confirm("Are you sure you want to reset your CV to the default sample template? This will replace your current edits.")) {
+      setResumeData(initialResumeData);
+      localStorage.removeItem(CV_STORAGE_KEY);
+      localStorage.removeItem(CV_META_KEY);
+      setSaveStatus('saved');
+    }
+  };
 
   // Clean Multi-Page Non-Slicing PDF Export Engine
   const handleExportPDF = async () => {
+
     const originalElement = document.getElementById('resume-a4-page');
     if (!originalElement) {
       window.print();
@@ -392,10 +482,54 @@ export const ResumeBuilder = () => {
           </button>
         </div>
 
-        <div className="hero-actions-row">
-          <button type="button" className="btn-secondary" onClick={() => alert("CV saved to local profile!")}>
-            <Save size={15} /> Save CV
+        <div className="hero-actions-row" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {/* Live Auto-save status badge */}
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '5px',
+            fontSize: '12px',
+            fontWeight: 700,
+            padding: '6px 12px',
+            borderRadius: '20px',
+            background: saveStatus === 'saving' ? 'rgba(234, 179, 8, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+            color: saveStatus === 'saving' ? '#eab308' : '#10b981',
+            border: `1px solid ${saveStatus === 'saving' ? 'rgba(234, 179, 8, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
+          }}>
+            {saveStatus === 'saving' ? (
+              <>
+                <Loader size={12} className="animate-spin" /> Saving...
+              </>
+            ) : saveStatus === 'synced' ? (
+              <>
+                <CheckCheck size={13} color="#10b981" /> Cloud Synced
+              </>
+            ) : (
+              <>
+                <Check size={13} color="#10b981" /> Auto-Saved
+              </>
+            )}
+          </div>
+
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={handleManualSave}
+            title="Force save all edits to local and cloud"
+          >
+            <Save size={14} /> Save CV
           </button>
+
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={handleResetToDefault}
+            title="Reset CV to initial sample data"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <RotateCcw size={13} /> Reset
+          </button>
+
           <button
             type="button"
             className="btn-primary"
@@ -407,6 +541,7 @@ export const ResumeBuilder = () => {
           </button>
         </div>
       </div>
+
 
       {/* Main Workspace Layout */}
       <div className="builder-main-grid">

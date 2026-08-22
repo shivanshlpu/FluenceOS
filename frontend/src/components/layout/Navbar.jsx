@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import useAuthStore from '../../store/authStore';
 import useNotificationStore from '../../store/notificationStore';
 import { useNewsPoller } from '../../hooks/useNewsPoller';
@@ -15,6 +15,16 @@ function timeAgo(iso) {
 
 export default function Navbar() {
     const navigate = useNavigate();
+    const location = useLocation();
+    const isRoot = location.pathname === '/';
+
+    const handleBack = () => {
+        if (window.history.length > 2) {
+            navigate(-1);
+        } else {
+            navigate('/');
+        }
+    };
     const { user, logout } = useAuthStore();
     const { notifications, unreadCount, markAllRead, markRead, clearAll } = useNotificationStore();
     const [scrolled, setScrolled] = useState(false);
@@ -27,6 +37,7 @@ export default function Navbar() {
 
     // Start news polling for the whole app
     useNewsPoller();
+
 
     // Clear Cache & Force Reload function
     const handleClearAppCache = async () => {
@@ -102,9 +113,23 @@ export default function Navbar() {
 
     return (
         <nav className="app-nav-header">
-            {/* Left: Desktop Nav Arrows + Search Input */}
+            {/* Left: Nav Back Button & Search Input */}
             <div className="nav-left-section">
-                {/* Back / Forward arrows (Hidden on mobile via CSS) */}
+                {/* Adaptive Mobile Back Button (Visible on mobile when not on root page) */}
+                {!isRoot && (
+                    <button
+                        type="button"
+                        onClick={handleBack}
+                        className="nav-mobile-back-btn"
+                        title="Go back"
+                        aria-label="Back"
+                    >
+                        <ChevronLeft size={18} />
+                        <span>Back</span>
+                    </button>
+                )}
+
+                {/* Back / Forward arrows (Desktop only) */}
                 <button
                     onClick={() => navigate(-1)}
                     className="nav-arrow-btn desktop-only"
@@ -129,6 +154,7 @@ export default function Navbar() {
                     />
                 </div>
             </div>
+
 
             {/* Right: Clear Cache + PWA Install + Bell + User Avatar */}
             <div className="nav-right-section">
@@ -477,6 +503,26 @@ export default function Navbar() {
                     color: #ef4444;
                 }
 
+                .nav-mobile-back-btn {
+                    display: none;
+                    align-items: center;
+                    gap: 3px;
+                    background: rgba(255, 255, 255, 0.08);
+                    border: 1px solid rgba(255, 255, 255, 0.12);
+                    color: #fff;
+                    padding: 5px 10px 5px 6px;
+                    border-radius: 18px;
+                    cursor: pointer;
+                    font-weight: 700;
+                    font-size: 12px;
+                    flex-shrink: 0;
+                    transition: all 0.15s ease;
+                }
+                .nav-mobile-back-btn:active {
+                    background: rgba(255, 255, 255, 0.18);
+                    transform: scale(0.96);
+                }
+
                 /* Mobile View Rules: Remove Back/Forward arrows, maximize search & fit right-side buttons */
                 @media (max-width: 768px) {
                     .app-nav-header {
@@ -485,6 +531,9 @@ export default function Navbar() {
                     }
                     .desktop-only {
                         display: none !important;
+                    }
+                    .nav-mobile-back-btn {
+                        display: inline-flex !important;
                     }
                     .nav-search-box {
                         max-width: 100%;
@@ -508,6 +557,7 @@ export default function Navbar() {
                         right: -50px;
                     }
                 }
+
             `}</style>
         </nav>
     );

@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Flame, Award, Target, CheckCircle2, Circle, TrendingUp, Calendar, Zap, ShieldCheck, RefreshCw, BarChart2 } from 'lucide-react';
+import { Flame, Award, Target, CheckCircle2, Circle, TrendingUp, Calendar, Zap, ShieldCheck, RefreshCw, BarChart2, Sparkles, CheckCheck, Loader } from 'lucide-react';
 import { pythonAPI } from '../../../services/api';
+
+const GOALS_CACHE_KEY = 'fluence_tracker_goals_today';
 
 export default function TrackerDashboard() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [goals, setGoals] = useState([]);
+    const [checkingIn, setCheckingIn] = useState(false);
+    const [checkinSuccess, setCheckinSuccess] = useState(false);
 
     useEffect(() => {
         loadTrackerData();
@@ -16,16 +20,64 @@ export default function TrackerDashboard() {
         try {
             const res = await pythonAPI.get('/api/tracker/dashboard');
             setData(res);
-            setGoals(res.dailyGoals || []);
+            if (res.dailyGoals && Array.isArray(res.dailyGoals)) {
+                setGoals(res.dailyGoals);
+                try {
+                    localStorage.setItem(GOALS_CACHE_KEY, JSON.stringify(res.dailyGoals));
+                } catch (e) {}
+            }
         } catch (err) {
             console.error('Tracker data load failed:', err);
+            // Local fallback from cache
+            try {
+                const cached = localStorage.getItem(GOALS_CACHE_KEY);
+                if (cached) setGoals(JSON.parse(cached));
+            } catch (e) {}
         } finally {
             setLoading(false);
         }
     };
 
-    const toggleGoal = (goalId) => {
-        setGoals(prev => prev.map(g => g.id === goalId ? { ...g, completed: !g.completed } : g));
+    const toggleGoal = async (goalId) => {
+        const targetGoal = goals.find(g => g.id === goalId);
+        if (!targetGoal) return;
+        const newStatus = !targetGoal.completed;
+
+        // Optimistic UI update
+        const updatedGoals = goals.map(g => g.id === goalId ? { ...g, completed: newStatus } : g);
+        setGoals(updatedGoals);
+        try {
+            localStorage.setItem(GOALS_CACHE_KEY, JSON.stringify(updatedGoals));
+        } catch (e) {}
+
+        try {
+            await pythonAPI.post('/api/tracker/toggle-goal', {
+                goalId,
+                completed: newStatus,
+                goalDate: data?.todayDate
+            });
+            // Re-fetch quietly to update heatmap and streaks
+            const res = await pythonAPI.get('/api/tracker/dashboard');
+            setData(res);
+        } catch (err) {
+            console.warn('Failed to sync goal toggle to backend:', err);
+        }
+    };
+
+    const handleClaimDailyStreak = async () => {
+        setCheckingIn(true);
+        try {
+            await pythonAPI.post('/api/tracker/checkin', { note: 'Daily habit check-in from Tracker' });
+            setCheckinSuccess(true);
+            const res = await pythonAPI.get('/api/tracker/dashboard');
+            setData(res);
+            if (res.dailyGoals) setGoals(res.dailyGoals);
+            setTimeout(() => setCheckinSuccess(false), 3500);
+        } catch (err) {
+            console.warn('Checkin failed:', err);
+        } finally {
+            setCheckingIn(false);
+        }
     };
 
     // Generate last 16 weeks (112 days) grid for the GitHub-style heatmap
@@ -60,46 +112,75 @@ export default function TrackerDashboard() {
 
     const completedGoalsCount = goals.filter(g => g.completed).length;
     const progressPercent = goals.length > 0 ? Math.round((completedGoalsCount / goals.length) * 100) : 0;
+    const isTodayActive = data?.todayActive || data?.currentStreak > 0;
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             {/* Top Row: Streak Banner & Highlights */}
             <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
                 gap: '16px',
             }}>
-                {/* Current Streak */}
+                {/* Current Streak Card */}
                 <div style={{
                     padding: '20px',
                     borderRadius: '16px',
-                    background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(249, 115, 22, 0.15))',
-                    border: '1.5px solid rgba(249, 115, 22, 0.3)',
+                    background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.18), rgba(249, 115, 22, 0.18))',
+                    border: '1.5px solid rgba(249, 115, 22, 0.4)',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '16px',
+                    justifyContent: 'space-between',
+                    gap: '14px',
                 }}>
-                    <div style={{
-                        width: '54px',
-                        height: '54px',
-                        borderRadius: '50%',
-                        background: 'linear-gradient(135deg, #ef4444, #f97316)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '26px',
-                        boxShadow: '0 4px 15px rgba(249, 115, 22, 0.4)',
-                    }}>
-                        🔥
-                    </div>
-                    <div>
-                        <div style={{ fontSize: '28px', fontWeight: 900, color: '#fff' }}>
-                            {data?.currentStreak ?? 1} Days
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                        <div style={{
+                            width: '54px',
+                            height: '54px',
+                            borderRadius: '50%',
+                            background: 'linear-gradient(135deg, #ef4444, #f97316)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '26px',
+                            boxShadow: '0 4px 15px rgba(249, 115, 22, 0.4)',
+                            flexShrink: 0,
+                        }}>
+                            🔥
                         </div>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#fb923c' }}>
-                            Current Daily Streak
+                        <div>
+                            <div style={{ fontSize: '30px', fontWeight: 900, color: '#fff', lineHeight: 1.1 }}>
+                                {data?.currentStreak ?? 1} <span style={{ fontSize: '16px', fontWeight: 700, color: '#fba76a' }}>Days</span>
+                            </div>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: '#fb923c', marginTop: '2px' }}>
+                                Active Practice Streak
+                            </div>
                         </div>
                     </div>
+
+                    {/* Quick Claim Button */}
+                    <button
+                        onClick={handleClaimDailyStreak}
+                        disabled={checkingIn}
+                        style={{
+                            padding: '8px 14px',
+                            borderRadius: '10px',
+                            background: checkinSuccess ? '#10b981' : (isTodayActive ? 'rgba(249, 115, 22, 0.25)' : 'linear-gradient(135deg, #ef4444, #f97316)'),
+                            color: '#fff',
+                            border: `1px solid ${checkinSuccess ? '#10b981' : 'rgba(249, 115, 22, 0.5)'}`,
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            cursor: checkingIn ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            whiteSpace: 'nowrap',
+                            transition: 'all 0.2s ease',
+                        }}
+                    >
+                        {checkingIn ? <Loader size={13} className="animate-spin" /> : checkinSuccess ? <CheckCheck size={14} /> : <Zap size={13} />}
+                        {checkinSuccess ? 'Streak Secured!' : isTodayActive ? 'Keep Streak 🔥' : 'Claim Streak'}
+                    </button>
                 </div>
 
                 {/* Longest Streak */}
@@ -121,14 +202,15 @@ export default function TrackerDashboard() {
                         alignItems: 'center',
                         justifyContent: 'center',
                         fontSize: '24px',
+                        flexShrink: 0,
                     }}>
                         ⚡
                     </div>
                     <div>
-                        <div style={{ fontSize: '28px', fontWeight: 900, color: '#fff' }}>
-                            {data?.longestStreak ?? 1} Days
+                        <div style={{ fontSize: '28px', fontWeight: 900, color: '#fff', lineHeight: 1.1 }}>
+                            {data?.longestStreak ?? 1} <span style={{ fontSize: '15px', color: 'var(--text-muted)' }}>Days</span>
                         </div>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', marginTop: '2px' }}>
                             Personal Best Streak
                         </div>
                     </div>
@@ -153,14 +235,15 @@ export default function TrackerDashboard() {
                         alignItems: 'center',
                         justifyContent: 'center',
                         fontSize: '24px',
+                        flexShrink: 0,
                     }}>
                         ⏱️
                     </div>
                     <div>
-                        <div style={{ fontSize: '28px', fontWeight: 900, color: '#fff' }}>
-                            {data?.totalMinutesPracticed ?? 24}m
+                        <div style={{ fontSize: '28px', fontWeight: 900, color: '#fff', lineHeight: 1.1 }}>
+                            {data?.totalMinutesPracticed ?? 20}m
                         </div>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', marginTop: '2px' }}>
                             Total Practice Time
                         </div>
                     </div>
@@ -174,7 +257,7 @@ export default function TrackerDashboard() {
                 background: 'var(--bg-elevated-1)',
                 border: '1px solid rgba(255, 255, 255, 0.06)',
             }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <Calendar size={18} color="#10b981" />
                         <h3 style={{ fontSize: '16px', fontWeight: 800, color: '#fff' }}>
@@ -317,7 +400,7 @@ export default function TrackerDashboard() {
                 padding: '24px',
                 borderRadius: '16px',
                 background: 'var(--bg-elevated-1)',
-                border: '1px solid rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
                     <Award size={18} color="#fbbf24" />
