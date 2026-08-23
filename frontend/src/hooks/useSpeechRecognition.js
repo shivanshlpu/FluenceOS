@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
-export const useSpeechRecognition = () => {
+export const useSpeechRecognition = (onSilenceDetected = null) => {
     const [transcript, setTranscript] = useState('');
     const [interimTranscript, setInterimTranscript] = useState('');
     const [isListening, setIsListening] = useState(false);
@@ -8,33 +8,38 @@ export const useSpeechRecognition = () => {
     const recognitionRef = useRef(null);
     const stopRequestedRef = useRef(false);
     const isMountedRef = useRef(true);
+    const silenceTimerRef = useRef(null);
 
     useEffect(() => {
         isMountedRef.current = true;
         return () => {
             isMountedRef.current = false;
             stopRequestedRef.current = true;
+            if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
             try {
                 if (recognitionRef.current) {
-                    recognitionRef.current.stop();
+                    recognitionRef.current.abort ? recognitionRef.current.abort() : recognitionRef.current.stop();
                 }
-            } catch (e) {
-                // ignore cleanup errors
-            }
+            } catch (e) {}
         };
+    }, []);
+
+    const resetTranscript = useCallback(() => {
+        setTranscript('');
+        setInterimTranscript('');
     }, []);
 
     const startListening = useCallback(() => {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
-            setError('Speech recognition not supported in this browser. Use Chrome or Edge.');
+            setError('Speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.');
             return;
         }
 
-        // Clean up previous instance if any
+        // Clean up previous instance
         if (recognitionRef.current) {
             try {
-                recognitionRef.current.stop();
+                recognitionRef.current.abort ? recognitionRef.current.abort() : recognitionRef.current.stop();
             } catch (e) {}
         }
 
@@ -42,23 +47,37 @@ export const useSpeechRecognition = () => {
         recognition.continuous = true;
         recognition.interimResults = true;
         recognition.lang = 'en-US';
+        recognition.maxAlternatives = 1;
 
         recognition.onresult = (event) => {
             if (!isMountedRef.current) return;
-            let finalText = '';
-            let interimText = '';
 
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                const result = event.results[i];
-                if (result.isFinal) {
-                    finalText += result[0].transcript + ' ';
+            let finalStr = '';
+            let interimStr = '';
+
+            // Iterate over all results in current session from 0 to avoid duplicates
+            for (let i = 0; i < event.results.length; i++) {
+                const res = event.results[i];
+                const text = res[0].transcript;
+                if (res.isFinal) {
+                    finalStr += (finalStr ? ' ' : '') + text.trim();
                 } else {
-                    interimText += result[0].transcript;
+                    interimStr += (interimStr ? ' ' : '') + text.trim();
                 }
             }
 
-            if (finalText) setTranscript((prev) => prev + finalText);
-            setInterimTranscript(interimText);
+            setTranscript(finalStr);
+            setInterimTranscript(interimStr);
+
+            // Silence auto-detection timer (if callback provided)
+            if (onSilenceDetected && (finalStr || interimStr)) {
+                if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+                silenceTimerRef.current = setTimeout(() => {
+                    if (isMountedRef.current && (finalStr || interimStr)) {
+                        onSilenceDetected(finalStr || interimStr);
+                    }
+                }, 2200); // 2.2s of silence triggers auto-send
+            }
         };
 
         recognition.onstart = () => {
@@ -73,7 +92,7 @@ export const useSpeechRecognition = () => {
             if (!isMountedRef.current) return;
 
             if (!stopRequestedRef.current) {
-                // Try restarting once if stopped unexpectedly (due to silence), but only if still mounted
+                // Auto-restart if disconnected prematurely
                 try {
                     recognition.start();
                 } catch (e) {
@@ -92,10 +111,8 @@ export const useSpeechRecognition = () => {
 
         recognition.onerror = (e) => {
             if (!isMountedRef.current) return;
-            if (e.error === 'no-speech') {
-                return;
-            }
-            console.warn('Speech recognition warning:', e.error);
+            if (e.error === 'no-speech') return; // Silence is normal
+            console.warn('[SPEECH] Recognition warning:', e.error);
             setError(e.error);
             if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
                 stopRequestedRef.current = true;
@@ -107,12 +124,13 @@ export const useSpeechRecognition = () => {
         try {
             recognition.start();
         } catch (e) {
-            console.warn('Recognition start exception:', e);
+            console.warn('[SPEECH] Recognition start error:', e);
         }
-    }, []);
+    }, [onSilenceDetected]);
 
     const stopListening = useCallback(() => {
         stopRequestedRef.current = true;
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
         try {
             recognitionRef.current?.stop();
         } catch (e) {}
@@ -120,11 +138,6 @@ export const useSpeechRecognition = () => {
             setIsListening(false);
             setInterimTranscript('');
         }
-    }, []);
-
-    const resetTranscript = useCallback(() => {
-        setTranscript('');
-        setInterimTranscript('');
     }, []);
 
     return {

@@ -1,34 +1,35 @@
-import { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, RefreshCw, Sparkles, Send, Award, CheckCircle2, AlertCircle, Play, Square, MessageSquare } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Volume2, VolumeX, RefreshCw, Sparkles, Send, Award, CheckCircle2, AlertCircle, Play, Square, MessageSquare, Mic, MicOff, RotateCcw, Bot, User, Check, Lightbulb } from 'lucide-react';
 import { pythonAPI } from '../../../services/api';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const SCENARIOS = [
     {
         id: 'interview',
         title: 'Tech Job Interview',
         icon: '💼',
-        desc: 'Practice answering behavioral & system design questions for software roles.',
-        initialPrompt: "Hello! Thank you for joining today's technical interview. To start off, could you briefly introduce yourself and tell me about a challenging project you worked on recently?"
+        desc: 'Practice answering behavioral & technical questions for software and engineering roles.',
+        initialPrompt: "Hello! Thank you for joining today's technical interview. To start off, could you introduce yourself and tell me about a recent project you worked on?"
     },
     {
         id: 'daily_chat',
         title: 'Casual Conversation',
         icon: '☕',
-        desc: 'Relaxed daily chit-chat about hobbies, current events, and weekend plans.',
-        initialPrompt: "Hey there! How is your day going so far? Did you do anything interesting or fun today?"
+        desc: 'Relaxed daily chit-chat about hobbies, current events, weekend plans, and culture.',
+        initialPrompt: "Hey there! How is your day going so far? What have you been up to today?"
     },
     {
         id: 'ielts_speaking',
         title: 'IELTS / TOEFL Prep',
         icon: '🎓',
-        desc: 'Structured 2-minute prompt cards with rigorous fluency and vocabulary grading.',
-        initialPrompt: "Welcome to your speaking assessment. Let's start with Part 1: Describe a city you have visited that left a strong impression on you."
+        desc: 'Structured speaking prompt cards with rigorous fluency, vocabulary, and grammar feedback.',
+        initialPrompt: "Welcome to your English speaking assessment. Let's start with Part 1: Describe a city or place you have visited that left a strong impression on you."
     },
     {
         id: 'negotiation',
         title: 'Salary & Client Negotiation',
         icon: '🤝',
-        desc: 'Assertive, polite professional communication for career and business growth.',
+        desc: 'Assertive, polite professional communication for job offers, freelancing, and client pitches.',
         initialPrompt: "Thanks for meeting with me to discuss the offer. What compensation range and benefits are you targeting for this role?"
     }
 ];
@@ -42,175 +43,88 @@ export default function ConversationEngine() {
     const [isListening, setIsListening] = useState(false);
     const [isSpeakingAI, setIsSpeakingAI] = useState(false);
     const [currentTranscript, setCurrentTranscript] = useState('');
+    const [interimText, setInterimText] = useState('');
+    const [textInput, setTextInput] = useState('');
     const [loadingAI, setLoadingAI] = useState(false);
     const [autoSpeak, setAutoSpeak] = useState(true);
+    const [hasStarted, setHasStarted] = useState(false);
     const [stats, setStats] = useState({ wpm: 0, fillerCount: 0, totalWords: 0 });
 
     const recognitionRef = useRef(null);
     const messagesEndRef = useRef(null);
     const speechStartTimeRef = useRef(null);
     const isMountedRef = useRef(true);
+    const silenceTimeoutRef = useRef(null);
 
-    const [hasStarted, setHasStarted] = useState(false);
-
-    // Unmount cleanup: cancel speech and stop mic
+    // Clean unmount
     useEffect(() => {
         isMountedRef.current = true;
         return () => {
             isMountedRef.current = false;
+            if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
             if (window.speechSynthesis) {
                 try { window.speechSynthesis.cancel(); } catch (e) {}
             }
             if (recognitionRef.current) {
-                try { recognitionRef.current.stop(); } catch (e) {}
+                try { recognitionRef.current.abort ? recognitionRef.current.abort() : recognitionRef.current.stop(); } catch (e) {}
             }
         };
     }, []);
-
-    const handleStartSession = (scenario = selectedScenario) => {
-        stopSpeakingAI();
-        setSelectedScenario(scenario);
-        setMessages([
-            {
-                role: 'assistant',
-                content: scenario.initialPrompt,
-                feedback: null
-            }
-        ]);
-        setHasStarted(true);
-        if (autoSpeak) {
-            speakText(scenario.initialPrompt);
-        }
-    };
-
-    const handleEndSession = () => {
-        stopSpeakingAI();
-        if (isListening && recognitionRef.current) {
-            try { recognitionRef.current.stop(); } catch (e) {}
-            setIsListening(false);
-        }
-        setHasStarted(false);
-        setMessages([]);
-        setCurrentTranscript('');
-    };
 
     // Scroll to bottom on new message
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, currentTranscript]);
+    }, [messages, currentTranscript, interimText, loadingAI]);
 
-    // Setup Web Speech Recognition once on mount
-    useEffect(() => {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SpeechRecognition) {
-            const recognition = new SpeechRecognition();
-            recognition.continuous = true;
-            recognition.interimResults = true;
-            recognition.lang = 'en-US';
-
-            recognition.onresult = (event) => {
-                if (!isMountedRef.current) return;
-                let interim = '';
-                let final = '';
-
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    if (event.results[i].isFinal) {
-                        final += event.results[i][0].transcript;
-                    } else {
-                        interim += event.results[i][0].transcript;
-                    }
-                }
-
-                setCurrentTranscript(prev => {
-                    const fullText = (prev + ' ' + final + ' ' + interim).trim();
-
-                    // Calculate stats
-                    if (speechStartTimeRef.current) {
-                        const elapsedMin = (Date.now() - speechStartTimeRef.current) / 60000;
-                        const words = fullText.split(/\s+/).filter(Boolean);
-                        const wpm = elapsedMin > 0.05 ? Math.round(words.length / elapsedMin) : 0;
-
-                        let fillers = 0;
-                        const lower = fullText.toLowerCase();
-                        FILLER_WORDS.forEach(fw => {
-                            const regex = new RegExp(`\\b${fw}\\b`, 'gi');
-                            const matches = lower.match(regex);
-                            if (matches) fillers += matches.length;
-                        });
-
-                        setStats({ wpm, fillerCount: fillers, totalWords: words.length });
-                    }
-                    return fullText;
-                });
-            };
-
-            recognition.onerror = (event) => {
-                if (isMountedRef.current) {
-                    console.warn('Speech recognition event warning:', event.error);
-                    setIsListening(false);
-                }
-            };
-
-            recognition.onend = () => {
-                if (isMountedRef.current) {
-                    setIsListening(false);
-                }
-            };
-
-            recognitionRef.current = recognition;
-        }
-
-        return () => {
-            if (recognitionRef.current) {
-                try { recognitionRef.current.stop(); } catch (e) {}
-            }
-        };
-    }, []);
-
-    const toggleListening = () => {
-        if (!recognitionRef.current) {
-            alert('Your browser does not support Speech Recognition. Please use Google Chrome or Microsoft Edge.');
+    // TTS Voice Synthesizer
+    const speakText = useCallback((text, onFinish = null) => {
+        if (!window.speechSynthesis || !text) {
+            if (onFinish) onFinish();
             return;
         }
 
-        if (isListening) {
-            try { recognitionRef.current.stop(); } catch (e) {}
-            setIsListening(false);
-        } else {
-            setCurrentTranscript('');
-            speechStartTimeRef.current = Date.now();
-            stopSpeakingAI();
-            try {
-                recognitionRef.current.start();
-                setIsListening(true);
-            } catch (err) {
-                console.warn('Recognition start caught error:', err);
-            }
-        }
-    };
-
-    const speakText = (text) => {
-        if (!window.speechSynthesis || !text) return;
         try {
             window.speechSynthesis.cancel();
+            window.speechSynthesis.resume();
+
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'en-US';
-            utterance.rate = 1.0;
+            utterance.rate = 0.95;
             utterance.pitch = 1.0;
 
             const voices = window.speechSynthesis.getVoices?.() || [];
-            const naturalVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('David')));
-            if (naturalVoice) utterance.voice = naturalVoice;
+            const preferredVoice = voices.find(v =>
+                v.lang.startsWith('en') &&
+                (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Jenny') || v.name.includes('David'))
+            ) || voices.find(v => v.lang.startsWith('en'));
 
-            utterance.onstart = () => { if (isMountedRef.current) setIsSpeakingAI(true); };
-            utterance.onend = () => { if (isMountedRef.current) setIsSpeakingAI(false); };
-            utterance.onerror = () => { if (isMountedRef.current) setIsSpeakingAI(false); };
+            if (preferredVoice) utterance.voice = preferredVoice;
+
+            utterance.onstart = () => {
+                if (isMountedRef.current) setIsSpeakingAI(true);
+            };
+
+            utterance.onend = () => {
+                if (isMountedRef.current) {
+                    setIsSpeakingAI(false);
+                    if (onFinish) onFinish();
+                }
+            };
+
+            utterance.onerror = () => {
+                if (isMountedRef.current) {
+                    setIsSpeakingAI(false);
+                    if (onFinish) onFinish();
+                }
+            };
 
             window.speechSynthesis.speak(utterance);
         } catch (e) {
-            console.warn('Speech synthesis error:', e);
+            console.warn('[TTS] Speech synthesis error:', e);
+            if (isMountedRef.current) setIsSpeakingAI(false);
+            if (onFinish) onFinish();
         }
-    };
+    }, []);
 
     const stopSpeakingAI = () => {
         if (window.speechSynthesis) {
@@ -219,14 +133,156 @@ export default function ConversationEngine() {
         }
     };
 
-    const handleSendMessage = async (textToSend) => {
-        const text = (textToSend || currentTranscript).trim();
+    // Initialize Web Speech Recognition
+    const startListening = useCallback(() => {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            alert('Your browser does not support Speech Recognition. Please use Google Chrome or Microsoft Edge.');
+            return;
+        }
+
+        stopSpeakingAI();
+
+        if (recognitionRef.current) {
+            try { recognitionRef.current.abort ? recognitionRef.current.abort() : recognitionRef.current.stop(); } catch (e) {}
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+        recognition.maxAlternatives = 1;
+
+        recognition.onstart = () => {
+            if (isMountedRef.current) {
+                setIsListening(true);
+                speechStartTimeRef.current = Date.now();
+            }
+        };
+
+        recognition.onresult = (event) => {
+            if (!isMountedRef.current) return;
+
+            let finalStr = '';
+            let interimStr = '';
+
+            for (let i = 0; i < event.results.length; i++) {
+                const res = event.results[i];
+                const text = res[0].transcript;
+                if (res.isFinal) {
+                    finalStr += (finalStr ? ' ' : '') + text.trim();
+                } else {
+                    interimStr += (interimStr ? ' ' : '') + text.trim();
+                }
+            }
+
+            const currentSpoken = finalStr || interimStr;
+            setCurrentTranscript(finalStr);
+            setInterimText(interimStr);
+
+            // Compute Stats
+            if (currentSpoken && speechStartTimeRef.current) {
+                const elapsedMin = (Date.now() - speechStartTimeRef.current) / 60000;
+                const words = currentSpoken.split(/\s+/).filter(Boolean);
+                const wpm = elapsedMin > 0.05 ? Math.round(words.length / elapsedMin) : 0;
+
+                let fillers = 0;
+                const lower = currentSpoken.toLowerCase();
+                FILLER_WORDS.forEach(fw => {
+                    const regex = new RegExp(`\\b${fw}\\b`, 'gi');
+                    const matches = lower.match(regex);
+                    if (matches) fillers += matches.length;
+                });
+
+                setStats({ wpm, fillerCount: fillers, totalWords: words.length });
+            }
+
+            // Auto-send after 2.5s of silence if user has spoken
+            if (finalStr.trim().length > 5) {
+                if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+                silenceTimeoutRef.current = setTimeout(() => {
+                    if (isMountedRef.current && finalStr.trim()) {
+                        handleSendMessage(finalStr.trim());
+                    }
+                }, 2500);
+            }
+        };
+
+        recognition.onerror = (event) => {
+            if (!isMountedRef.current) return;
+            if (event.error === 'no-speech') return;
+            console.warn('[STT] Recognition warning:', event.error);
+            if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                setIsListening(false);
+            }
+        };
+
+        recognition.onend = () => {
+            if (isMountedRef.current) {
+                setIsListening(false);
+            }
+        };
+
+        recognitionRef.current = recognition;
+        try {
+            recognition.start();
+        } catch (e) {
+            console.warn('[STT] Start exception:', e);
+        }
+    }, [speakText]);
+
+    const stopListening = useCallback(() => {
+        if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+        if (recognitionRef.current) {
+            try { recognitionRef.current.stop(); } catch (e) {}
+        }
+        if (isMountedRef.current) {
+            setIsListening(false);
+            setInterimText('');
+        }
+    }, []);
+
+    // Start Session
+    const handleStartSession = (scenario = selectedScenario) => {
+        stopSpeakingAI();
+        setSelectedScenario(scenario);
+        const firstMsg = {
+            role: 'assistant',
+            content: scenario.initialPrompt,
+            feedback: null
+        };
+        setMessages([firstMsg]);
+        setHasStarted(true);
+        setCurrentTranscript('');
+        setInterimText('');
+
+        if (autoSpeak) {
+            speakText(scenario.initialPrompt, () => {
+                // Auto-listen after initial AI prompt finishes
+                startListening();
+            });
+        } else {
+            startListening();
+        }
+    };
+
+    const handleEndSession = () => {
+        stopSpeakingAI();
+        stopListening();
+        setHasStarted(false);
+        setMessages([]);
+        setCurrentTranscript('');
+        setInterimText('');
+        setTextInput('');
+    };
+
+    // Send Turn to AI
+    const handleSendMessage = async (explicitText = null) => {
+        const text = (explicitText || currentTranscript || textInput).trim();
         if (!text || loadingAI) return;
 
-        if (isListening) {
-            try { recognitionRef.current?.stop(); } catch (e) {}
-            setIsListening(false);
-        }
+        stopListening();
+        stopSpeakingAI();
 
         const newUserMessage = {
             role: 'user',
@@ -237,6 +293,8 @@ export default function ConversationEngine() {
         const updatedHistory = [...messages, newUserMessage];
         setMessages(updatedHistory);
         setCurrentTranscript('');
+        setInterimText('');
+        setTextInput('');
         setLoadingAI(true);
 
         try {
@@ -246,7 +304,7 @@ export default function ConversationEngine() {
                 difficulty: difficulty
             });
 
-            const aiReply = res?.reply || "I understand. Could you tell me more about that?";
+            const aiReply = res?.reply || "That's a very interesting point! Could you elaborate a bit more on that?";
             const feedback = res?.feedback || null;
 
             if (isMountedRef.current) {
@@ -260,15 +318,20 @@ export default function ConversationEngine() {
                 });
 
                 if (autoSpeak) {
-                    speakText(aiReply);
+                    speakText(aiReply, () => {
+                        // Automatically restart mic after AI finishes speaking its response!
+                        if (isMountedRef.current && hasStarted) {
+                            startListening();
+                        }
+                    });
                 }
             }
         } catch (err) {
-            console.error('AI chat failed:', err);
+            console.error('[CHAT] AI turn failed:', err);
             if (isMountedRef.current) {
-                const fallbackReply = "That's a very interesting point! What else would you like to explore regarding this topic?";
+                const fallbackReply = "That makes sense! How did you handle the challenges that came with that?";
                 setMessages(prev => [...prev, { role: 'assistant', content: fallbackReply }]);
-                if (autoSpeak) speakText(fallbackReply);
+                if (autoSpeak) speakText(fallbackReply, () => startListening());
             }
         } finally {
             if (isMountedRef.current) {
@@ -282,246 +345,423 @@ export default function ConversationEngine() {
             {/* Scenario Header */}
             <div style={{
                 background: 'var(--bg-elevated-1)',
-                borderRadius: 'var(--radius-md)',
+                borderRadius: '16px',
                 padding: '20px',
-                border: '1px solid var(--border-subtle)'
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px',
             }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-                    <div>
-                        <h2 style={{ fontSize: '18px', fontWeight: 800, margin: '0 0 4px 0', color: '#fff' }}>
-                            {selectedScenario.icon} {selectedScenario.title}
-                        </h2>
-                        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
-                            {selectedScenario.desc}
-                        </p>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <select
-                            value={difficulty}
-                            onChange={e => setDifficulty(e.target.value)}
-                            style={{
-                                background: 'var(--bg-surface)',
-                                border: '1px solid var(--border-subtle)',
-                                color: '#fff',
-                                padding: '6px 12px',
-                                borderRadius: '8px',
-                                fontSize: '12px'
-                            }}
-                        >
-                            <option value="Beginner">Beginner</option>
-                            <option value="Intermediate">Intermediate</option>
-                            <option value="Advanced">Advanced</option>
-                        </select>
-
-                        <button
-                            type="button"
-                            onClick={() => setAutoSpeak(!autoSpeak)}
-                            style={{
-                                background: autoSpeak ? '#8b5cf6' : 'var(--bg-surface)',
-                                border: 'none',
-                                color: '#fff',
-                                padding: '6px 12px',
-                                borderRadius: '8px',
-                                fontSize: '12px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                cursor: 'pointer'
-                            }}
-                        >
-                            {autoSpeak ? <Volume2 size={14} /> : <VolumeX size={14} />}
-                            {autoSpeak ? 'AI Voice ON' : 'AI Voice OFF'}
-                        </button>
+                <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '24px' }}>{selectedScenario.icon}</span>
+                        <div>
+                            <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: '#fff' }}>
+                                {selectedScenario.title}
+                            </h2>
+                            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
+                                {selectedScenario.desc}
+                            </p>
+                        </div>
                     </div>
                 </div>
 
-                {/* Scenario Selector Pills */}
-                {!hasStarted && (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginTop: '16px' }}>
-                        {SCENARIOS.map(sc => (
-                            <div
-                                key={sc.id}
-                                onClick={() => setSelectedScenario(sc)}
-                                style={{
-                                    padding: '12px',
-                                    borderRadius: '10px',
-                                    background: selectedScenario.id === sc.id ? 'rgba(139, 92, 246, 0.15)' : 'var(--bg-surface)',
-                                    border: `1px solid ${selectedScenario.id === sc.id ? '#8b5cf6' : 'var(--border-subtle)'}`,
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                <div style={{ fontWeight: 700, fontSize: '13px', color: '#fff' }}>{sc.icon} {sc.title}</div>
-                                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{sc.desc}</div>
-                            </div>
-                        ))}
-                    </div>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <select
+                        value={difficulty}
+                        onChange={e => setDifficulty(e.target.value)}
+                        disabled={hasStarted}
+                        style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            background: '#121212',
+                            color: 'var(--text-primary)',
+                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            outline: 'none',
+                        }}
+                    >
+                        <option value="Beginner">Beginner Level</option>
+                        <option value="Intermediate">Intermediate Level</option>
+                        <option value="Advanced">Advanced Level</option>
+                    </select>
+
+                    <button
+                        onClick={() => setAutoSpeak(!autoSpeak)}
+                        title={autoSpeak ? 'Voice Audio Output Enabled' : 'Voice Audio Muted'}
+                        style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            background: autoSpeak ? 'rgba(168, 85, 247, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+                            border: autoSpeak ? '1px solid #a855f7' : '1px solid rgba(255, 255, 255, 0.1)',
+                            color: autoSpeak ? '#c084fc' : 'var(--text-secondary)',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                        }}
+                    >
+                        {autoSpeak ? <Volume2 size={15} /> : <VolumeX size={15} />}
+                        <span>{autoSpeak ? 'AI Voice ON' : 'AI Voice OFF'}</span>
+                    </button>
+                </div>
             </div>
 
-            {/* Main Conversation Container */}
-            <div style={{
-                background: 'var(--bg-elevated-1)',
-                borderRadius: 'var(--radius-md)',
-                padding: '20px',
-                border: '1px solid var(--border-subtle)',
-                minHeight: '340px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between'
-            }}>
-                {!hasStarted ? (
-                    <div style={{ textAlign: 'center', padding: '40px 20px' }}>
-                        <div style={{ fontSize: '40px', marginBottom: '12px' }}>{selectedScenario.icon}</div>
-                        <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px', color: '#fff' }}>Ready for your session?</h3>
-                        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', maxWidth: '400px', margin: '0 auto 20px' }}>
-                            Practice speaking naturally. AI provides real-time CEFR metrics and instant suggestions.
-                        </p>
-                        <button
-                            type="button"
-                            onClick={() => handleStartSession(selectedScenario)}
-                            style={{
-                                background: 'linear-gradient(135deg, #a855f7, #6366f1)',
-                                color: '#fff',
-                                border: 'none',
-                                padding: '12px 28px',
-                                borderRadius: '24px',
-                                fontWeight: 700,
-                                fontSize: '14px',
-                                cursor: 'pointer'
-                            }}
-                        >
-                            🚀 Start Conversation
-                        </button>
+            {/* Scenario Quick Selector (when session has not started) */}
+            {!hasStarted ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
+                        {SCENARIOS.map(s => {
+                            const isSelected = selectedScenario.id === s.id;
+                            return (
+                                <div
+                                    key={s.id}
+                                    onClick={() => setSelectedScenario(s)}
+                                    style={{
+                                        padding: '18px',
+                                        borderRadius: '14px',
+                                        background: isSelected ? 'rgba(168, 85, 247, 0.12)' : 'var(--bg-elevated-1)',
+                                        border: isSelected ? '1.5px solid #a855f7' : '1px solid rgba(255, 255, 255, 0.06)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease',
+                                    }}
+                                >
+                                    <div style={{ fontSize: '28px', marginBottom: '8px' }}>{s.icon}</div>
+                                    <h3 style={{ fontSize: '15px', fontWeight: 800, color: isSelected ? '#c084fc' : '#fff', marginBottom: '4px' }}>
+                                        {s.title}
+                                    </h3>
+                                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                                        {s.desc}
+                                    </p>
+                                </div>
+                            );
+                        })}
                     </div>
-                ) : (
-                    <>
-                        {/* Messages Area */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', maxHeight: '420px', overflowY: 'auto', paddingRight: '6px' }}>
-                            {messages.map((m, idx) => (
+
+                    <button
+                        onClick={() => handleStartSession(selectedScenario)}
+                        style={{
+                            padding: '16px 28px',
+                            borderRadius: '12px',
+                            background: 'linear-gradient(135deg, #a855f7, #7c3aed)',
+                            border: 'none',
+                            color: '#fff',
+                            fontSize: '14px',
+                            fontWeight: 800,
+                            letterSpacing: '0.04em',
+                            textTransform: 'uppercase',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            boxShadow: '0 8px 24px rgba(168, 85, 247, 0.35)',
+                        }}
+                    >
+                        <Play size={16} fill="#fff" />
+                        <span>Start 2-Way AI Voice Conversation</span>
+                    </button>
+                </div>
+            ) : (
+                /* Live Conversation Active Screen */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    {/* Live Status Bar */}
+                    <div style={{
+                        padding: '12px 18px',
+                        borderRadius: '12px',
+                        background: isSpeakingAI
+                            ? 'rgba(168, 85, 247, 0.15)'
+                            : isListening
+                            ? 'rgba(239, 68, 68, 0.15)'
+                            : 'var(--bg-elevated-1)',
+                        border: isSpeakingAI
+                            ? '1px solid #a855f7'
+                            : isListening
+                            ? '1px solid #ef4444'
+                            : '1px solid rgba(255, 255, 255, 0.08)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '10px',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            {isSpeakingAI ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#c084fc', fontWeight: 800, fontSize: '13px' }}>
+                                    <Volume2 size={18} className="animate-pulse" />
+                                    <span>AI Partner is Speaking... (Listen carefully)</span>
+                                </div>
+                            ) : isListening ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#f87171', fontWeight: 800, fontSize: '13px' }}>
+                                    <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} className="animate-ping" />
+                                    <span>Listening to your voice... (Speak now)</span>
+                                </div>
+                            ) : (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '13px' }}>
+                                    <span>Ready for your answer</span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Live Pacing & Filler Stats */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            <span>Speed: <strong style={{ color: '#fff' }}>{stats.wpm} WPM</strong></span>
+                            <span>Fillers: <strong style={{ color: stats.fillerCount > 2 ? '#fbbf24' : '#10b981' }}>{stats.fillerCount}</strong></span>
+                            <button
+                                onClick={handleEndSession}
+                                style={{
+                                    padding: '5px 10px',
+                                    borderRadius: '6px',
+                                    background: 'rgba(239, 68, 68, 0.15)',
+                                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                                    color: '#f87171',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                }}
+                            >
+                                End Session
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Messages Container */}
+                    <div style={{
+                        minHeight: '340px',
+                        maxHeight: '480px',
+                        overflowY: 'auto',
+                        padding: '16px',
+                        borderRadius: '16px',
+                        background: '#0d0d12',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '14px',
+                    }}>
+                        {messages.map((msg, idx) => {
+                            const isUser = msg.role === 'user';
+                            return (
                                 <div
                                     key={idx}
                                     style={{
-                                        alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-                                        maxWidth: '85%',
-                                        background: m.role === 'user' ? '#7c3aed' : 'var(--bg-surface)',
-                                        borderRadius: m.role === 'user' ? '14px 14px 2px 14px' : '14px 14px 14px 2px',
-                                        padding: '12px 16px',
-                                        color: '#fff',
-                                        fontSize: '13.5px',
-                                        lineHeight: 1.45,
-                                        border: m.role === 'user' ? 'none' : '1px solid var(--border-subtle)'
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: isUser ? 'flex-end' : 'flex-start',
+                                        gap: '6px',
                                     }}
                                 >
-                                    <div style={{ fontWeight: 700, fontSize: '11px', color: m.role === 'user' ? '#e9d5ff' : '#a78bfa', marginBottom: '4px' }}>
-                                        {m.role === 'user' ? 'You' : 'AI Coach'}
-                                    </div>
-                                    <div>{m.content}</div>
+                                    <div style={{
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        gap: '8px',
+                                        maxWidth: '85%',
+                                        flexDirection: isUser ? 'row-reverse' : 'row',
+                                    }}>
+                                        <div style={{
+                                            width: '32px',
+                                            height: '32px',
+                                            borderRadius: '50%',
+                                            background: isUser ? 'linear-gradient(135deg, #10b981, #059669)' : 'linear-gradient(135deg, #a855f7, #7c3aed)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            color: '#fff',
+                                            fontSize: '14px',
+                                            flexShrink: 0,
+                                        }}>
+                                            {isUser ? <User size={16} /> : <Bot size={16} />}
+                                        </div>
 
-                                    {m.feedback && (
-                                        <div style={{ marginTop: '8px', padding: '6px 10px', background: 'rgba(0,0,0,0.2)', borderRadius: '6px', fontSize: '11px', color: '#34d399' }}>
-                                            ✨ {m.feedback}
+                                        <div style={{
+                                            padding: '12px 16px',
+                                            borderRadius: '14px',
+                                            background: isUser ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+                                            border: isUser ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
+                                            color: '#fff',
+                                            fontSize: '14px',
+                                            lineHeight: 1.55,
+                                        }}>
+                                            {msg.content}
+
+                                            {/* Audio replay button on AI message */}
+                                            {!isUser && (
+                                                <button
+                                                    onClick={() => speakText(msg.content)}
+                                                    style={{
+                                                        marginTop: '6px',
+                                                        background: 'transparent',
+                                                        border: 'none',
+                                                        color: '#c084fc',
+                                                        fontSize: '11px',
+                                                        fontWeight: 700,
+                                                        cursor: 'pointer',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '4px',
+                                                        padding: 0,
+                                                    }}
+                                                >
+                                                    <Volume2 size={13} />
+                                                    <span>Replay Audio</span>
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Inline Feedback Card on User Answer */}
+                                    {isUser && msg.feedback && (
+                                        <div style={{
+                                            maxWidth: '82%',
+                                            padding: '10px 14px',
+                                            borderRadius: '10px',
+                                            background: 'rgba(168, 85, 247, 0.08)',
+                                            border: '1px solid rgba(168, 85, 247, 0.25)',
+                                            fontSize: '12px',
+                                            lineHeight: 1.45,
+                                        }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                                                <Sparkles size={13} color="#c084fc" />
+                                                <span style={{ fontWeight: 800, color: '#c084fc' }}>
+                                                    Speaking Feedback ({msg.feedback.cefrScore || 'B2'})
+                                                </span>
+                                            </div>
+                                            {msg.feedback.correction && (
+                                                <div style={{ color: '#f87171', marginBottom: '2px' }}>
+                                                    <strong>Correction:</strong> {msg.feedback.correction}
+                                                </div>
+                                            )}
+                                            {msg.feedback.betterAlternative && (
+                                                <div style={{ color: '#34d399', marginBottom: '2px' }}>
+                                                    <strong>Better way to say:</strong> "{msg.feedback.betterAlternative}"
+                                                </div>
+                                            )}
+                                            {msg.feedback.tip && (
+                                                <div style={{ color: 'var(--text-muted)' }}>
+                                                    💡 {msg.feedback.tip}
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
-                            ))}
-                            {loadingAI && (
-                                <div style={{ alignSelf: 'flex-start', background: 'var(--bg-surface)', padding: '10px 14px', borderRadius: '12px', color: '#a78bfa', fontSize: '12px' }}>
-                                    💭 AI Coach is thinking...
+                            );
+                        })}
+
+                        {/* Live Transcribing Bubble */}
+                        {(currentTranscript || interimText) && (
+                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                <div style={{
+                                    padding: '10px 16px',
+                                    borderRadius: '14px',
+                                    background: 'rgba(239, 68, 68, 0.12)',
+                                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                                    color: '#fff',
+                                    fontSize: '13.5px',
+                                    maxWidth: '85%',
+                                }}>
+                                    <span>{currentTranscript} </span>
+                                    <span style={{ color: '#fca5a5', fontStyle: 'italic' }}>{interimText}</span>
+                                    <span className="animate-pulse"> 🎙️</span>
                                 </div>
-                            )}
-                            <div ref={messagesEndRef} />
-                        </div>
-
-                        {/* Input and Mic Controls */}
-                        <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
-                            {currentTranscript && (
-                                <div style={{ padding: '8px 12px', background: 'rgba(139, 92, 246, 0.1)', borderRadius: '8px', fontSize: '13px', color: '#c4b5fd', marginBottom: '10px' }}>
-                                    🎙️ "{currentTranscript}"
-                                </div>
-                            )}
-
-                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                <button
-                                    type="button"
-                                    onClick={toggleListening}
-                                    style={{
-                                        width: '46px',
-                                        height: '46px',
-                                        borderRadius: '50%',
-                                        background: isListening ? '#ef4444' : '#8b5cf6',
-                                        border: 'none',
-                                        color: '#fff',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        cursor: 'pointer',
-                                        flexShrink: 0
-                                    }}
-                                >
-                                    {isListening ? <Square size={18} /> : <Play size={18} />}
-                                </button>
-
-                                <input
-                                    type="text"
-                                    placeholder={isListening ? "Listening to your voice..." : "Type or speak your answer..."}
-                                    value={currentTranscript}
-                                    onChange={e => setCurrentTranscript(e.target.value)}
-                                    onKeyDown={e => e.key === 'Enter' && handleSendMessage(currentTranscript)}
-                                    style={{
-                                        flex: 1,
-                                        background: 'var(--bg-surface)',
-                                        border: '1px solid var(--border-subtle)',
-                                        borderRadius: '24px',
-                                        padding: '12px 18px',
-                                        color: '#fff',
-                                        fontSize: '13px',
-                                        outline: 'none'
-                                    }}
-                                />
-
-                                <button
-                                    type="button"
-                                    onClick={() => handleSendMessage(currentTranscript)}
-                                    disabled={!currentTranscript.trim() || loadingAI}
-                                    style={{
-                                        background: (!currentTranscript.trim() || loadingAI) ? 'var(--bg-elevated-3)' : '#8b5cf6',
-                                        border: 'none',
-                                        color: '#fff',
-                                        padding: '12px 18px',
-                                        borderRadius: '24px',
-                                        fontWeight: 600,
-                                        fontSize: '13px',
-                                        cursor: (!currentTranscript.trim() || loadingAI) ? 'not-allowed' : 'pointer',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '6px'
-                                    }}
-                                >
-                                    <Send size={14} />
-                                    Send
-                                </button>
-
-                                <button
-                                    type="button"
-                                    onClick={handleEndSession}
-                                    style={{
-                                        background: 'var(--bg-surface)',
-                                        border: '1px solid var(--border-subtle)',
-                                        color: '#a5a0c2',
-                                        padding: '12px',
-                                        borderRadius: '24px',
-                                        fontSize: '12px',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    End
-                                </button>
                             </div>
+                        )}
+
+                        {/* AI Loading Bubble */}
+                        {loadingAI && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#c084fc', fontSize: '13px', fontStyle: 'italic' }}>
+                                <Bot size={18} className="animate-spin" />
+                                <span>AI Partner is thinking...</span>
+                            </div>
+                        )}
+
+                        <div ref={messagesEndRef} />
+                    </div>
+
+                    {/* Microphone & Input Controller */}
+                    <div style={{
+                        padding: '16px',
+                        borderRadius: '16px',
+                        background: 'var(--bg-elevated-1)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px',
+                    }}>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                            {/* Big Mic Button */}
+                            <button
+                                onClick={isListening ? stopListening : startListening}
+                                style={{
+                                    width: '52px',
+                                    height: '52px',
+                                    borderRadius: '50%',
+                                    background: isListening ? '#ef4444' : 'linear-gradient(135deg, #a855f7, #7c3aed)',
+                                    border: 'none',
+                                    color: '#fff',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    boxShadow: isListening ? '0 0 20px rgba(239, 68, 68, 0.6)' : '0 4px 14px rgba(168, 85, 247, 0.3)',
+                                    flexShrink: 0,
+                                    transition: 'all 0.2s ease',
+                                }}
+                                title={isListening ? 'Stop Listening' : 'Click to Speak'}
+                            >
+                                {isListening ? <MicOff size={22} /> : <Mic size={22} />}
+                            </button>
+
+                            {/* Manual Text / Edit Field */}
+                            <input
+                                placeholder={isListening ? "Listening to your microphone..." : "Or type your response here..."}
+                                value={currentTranscript || textInput}
+                                onChange={e => {
+                                    if (currentTranscript) setCurrentTranscript(e.target.value);
+                                    else setTextInput(e.target.value);
+                                }}
+                                onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+                                style={{
+                                    flex: 1,
+                                    padding: '14px 18px',
+                                    borderRadius: '12px',
+                                    background: '#121212',
+                                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                                    color: '#fff',
+                                    fontSize: '14px',
+                                    outline: 'none',
+                                }}
+                            />
+
+                            {/* Send Button */}
+                            <button
+                                onClick={() => handleSendMessage()}
+                                disabled={(!currentTranscript && !textInput) || loadingAI}
+                                style={{
+                                    padding: '14px 20px',
+                                    borderRadius: '12px',
+                                    background: (!currentTranscript && !textInput) || loadingAI ? 'rgba(255,255,255,0.06)' : '#10b981',
+                                    border: 'none',
+                                    color: (!currentTranscript && !textInput) || loadingAI ? 'var(--text-muted)' : '#000',
+                                    fontSize: '13px',
+                                    fontWeight: 800,
+                                    cursor: (!currentTranscript && !textInput) || loadingAI ? 'not-allowed' : 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    whiteSpace: 'nowrap',
+                                }}
+                            >
+                                <Send size={15} />
+                                <span>Send Answer</span>
+                            </button>
                         </div>
-                    </>
-                )}
-            </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

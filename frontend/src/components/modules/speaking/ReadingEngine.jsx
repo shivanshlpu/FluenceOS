@@ -1,75 +1,75 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useSpeechRecognition } from '../../../hooks/useSpeechRecognition';
 import { pythonAPI } from '../../../services/api';
 import FeedbackCard from './FeedbackCard';
 import ReadingFeedbackCard from './ReadingFeedbackCard';
-import { BookOpen, Mic, MicOff, RotateCcw, Send, Sparkles, ChevronDown, Loader } from 'lucide-react';
+import { BookOpen, Mic, MicOff, RotateCcw, Send, Sparkles, ChevronDown, Loader, Volume2, VolumeX, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const cardStyle = { background: 'var(--bg-elevated-1)', borderRadius: 'var(--radius-md)', padding: '24px' };
+const cardStyle = { background: 'var(--bg-elevated-1)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255, 255, 255, 0.08)' };
 const inputStyle = {
     width: '100%', padding: '14px 16px',
-    background: 'var(--bg-surface)', border: '1px solid transparent',
-    borderRadius: 'var(--radius-md)', color: 'var(--text-primary)',
+    background: 'var(--bg-surface, #121212)', border: '1px solid rgba(255, 255, 255, 0.1)',
+    borderRadius: '12px', color: 'var(--text-primary)',
     fontSize: '14px', outline: 'none', boxSizing: 'border-box',
     fontFamily: "'Figtree', sans-serif",
-    transition: 'border var(--transition-fast)', marginBottom: '12px',
+    transition: 'border 0.2s', marginBottom: '12px',
 };
-const btn = (disabled = false, color = 'var(--accent)') => ({
+const btn = (disabled = false, color = 'var(--accent, #10b981)') => ({
     width: '100%', padding: '14px',
-    borderRadius: 'var(--radius-pill)',
-    background: disabled ? 'var(--bg-elevated-3)' : color,
-    color: disabled ? 'var(--text-muted)' : '#fff',
-    fontSize: '13px', fontWeight: 700, letterSpacing: '1.5px',
+    borderRadius: '12px',
+    background: disabled ? 'rgba(255,255,255,0.08)' : color,
+    color: disabled ? 'var(--text-muted)' : (color === 'var(--accent, #10b981)' ? '#000' : '#fff'),
+    fontSize: '13px', fontWeight: 800, letterSpacing: '0.04em',
     textTransform: 'uppercase', cursor: disabled ? 'not-allowed' : 'pointer',
     border: 'none', display: 'flex', alignItems: 'center',
     justifyContent: 'center', gap: '8px',
-    transition: 'all var(--transition-fast)', fontFamily: "'Figtree', sans-serif",
+    transition: 'all 0.2s', fontFamily: "'Figtree', sans-serif",
 });
 
 const LEVELS = [
-    { id: 'beginner', label: '🌱 Beginner', desc: 'Simple words, short sentences' },
-    { id: 'intermediate', label: '🌿 Intermediate', desc: 'More vocabulary, varied structure' },
-    { id: 'advanced', label: '🌳 Advanced', desc: 'Complex ideas, rich vocabulary' },
+    { id: 'beginner', label: '🌱 Beginner', desc: 'Simple vocabulary, clear short sentences' },
+    { id: 'intermediate', label: '🌿 Intermediate', desc: 'Varied structure, practical idioms' },
+    { id: 'advanced', label: '🌳 Advanced', desc: 'Complex ideas, rich professional vocabulary' },
 ];
 
 const SUGGESTED_TOPICS = [
-    'Climate Change', 'Artificial Intelligence', 'Space Exploration',
-    'Healthy Food', 'Social Media', 'Electric Cars', 'Ocean Life', 'Yoga & Meditation'
+    'Artificial Intelligence', 'Space Exploration', 'Climate & Renewable Energy',
+    'Healthy Nutrition', 'Electric Vehicles', 'Deep Sea Marine Life',
+    'Career Growth & Leadership', 'Mindfulness & Meditation', 'Global Travel & Culture'
 ];
 
-// Highlight words in paragraph that the user has read (word-by-word match)
+// Highlight words in paragraph that the user has read
 function HighlightedParagraph({ paragraph, spokenWords }) {
     const words = paragraph.split(/(\s+)/);
-    const spokenLower = spokenWords.map(w => w.toLowerCase().replace(/[^a-z]/g, ''));
+    const spokenLower = spokenWords.map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ''));
     let spokenIdx = 0;
 
     return (
-        <p style={{ lineHeight: 1.9, fontSize: '16px', color: 'var(--text-primary)', letterSpacing: '0.01em' }}>
+        <p style={{ lineHeight: 1.9, fontSize: '16px', color: 'var(--text-primary)', letterSpacing: '0.01em', margin: 0 }}>
             {words.map((token, i) => {
                 const isSpace = /^\s+$/.test(token);
                 if (isSpace) return <span key={i}>{token}</span>;
 
-                const clean = token.toLowerCase().replace(/[^a-z]/g, '');
+                const clean = token.toLowerCase().replace(/[^a-z0-9]/g, '');
                 if (!clean) return <span key={i}>{token}</span>;
 
                 let matched = false;
-                // Look ahead up to 5 words in the spoken text to find a match (allows skipping mispronounced words)
-                for (let j = 0; j < 5; j++) {
+                for (let j = 0; j < 6; j++) {
                     if (spokenIdx + j < spokenLower.length && spokenLower[spokenIdx + j] === clean) {
                         matched = true;
-                        spokenIdx = spokenIdx + j + 1; // advance pointer past the matched word
+                        spokenIdx = spokenIdx + j + 1;
                         break;
                     }
                 }
 
                 return (
                     <span key={i} style={{
-                        background: matched ? 'rgba(30,215,96,0.18)' : 'transparent',
-                        color: matched ? 'var(--accent)' : 'var(--text-primary)',
-                        borderRadius: '3px', padding: '1px 1px',
+                        background: matched ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
+                        color: matched ? '#34d399' : 'var(--text-primary)',
+                        borderRadius: '4px', padding: '1px 3px',
                         fontWeight: matched ? 700 : 400,
-                        transition: 'all 0.2s',
+                        transition: 'all 0.15s ease',
                     }}>{token}</span>
                 );
             })}
@@ -80,38 +80,79 @@ function HighlightedParagraph({ paragraph, spokenWords }) {
 export default function ReadingEngine() {
     const [topic, setTopic] = useState('');
     const [level, setLevel] = useState('beginner');
-    const [paragraphData, setParagraphData] = useState(null);   // { paragraph, vocabulary, pronunciationTip }
-    const [phase, setPhase] = useState('input');               // input | read | record | result
+    const [paragraphData, setParagraphData] = useState(null);
+    const [phase, setPhase] = useState('input'); // input | read | record | result
     const [loading, setLoading] = useState(false);
     const [evaluation, setEvaluation] = useState(null);
     const [startTime, setStartTime] = useState(null);
+    const [isPlayingAudio, setIsPlayingAudio] = useState(false);
 
     const { transcript, interimTranscript, isListening, startListening, stopListening, resetTranscript } = useSpeechRecognition();
 
     const spokenWords = useMemo(() => transcript.trim().split(/\s+/).filter(Boolean), [transcript]);
 
-    const handleGetParagraph = async () => {
-        if (!topic.trim()) return;
-        setLoading(true);
+    const playNativeAudio = useCallback((text) => {
+        if (!window.speechSynthesis || !text) return;
         try {
-            const data = await pythonAPI.get(`/api/speaking/reading/paragraph?topic=${encodeURIComponent(topic)}&level=${level}`);
-            setParagraphData(data);
-            setPhase('read');
-        } catch (err) {
-            console.error('Paragraph generation failed:', err);
-            // Fallback
-            setParagraphData({
-                paragraph: `Let's practice reading about ${topic}. This is a great topic to improve your English. Start reading slowly and clearly. Each word matters when you speak. Take a deep breath before you begin. Focus on pronouncing every word correctly. When you finish, you will get a score. Practice makes perfect. The more you read, the better you speak. Good luck with your reading practice today!`,
-                wordCount: 65,
-                vocabulary: [],
-                pronunciationTip: 'Read slowly. Pause at every comma and full stop.'
-            });
-            setPhase('read');
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.resume();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'en-US';
+            utterance.rate = 0.9;
+            utterance.onstart = () => setIsPlayingAudio(true);
+            utterance.onend = () => setIsPlayingAudio(false);
+            utterance.onerror = () => setIsPlayingAudio(false);
+            window.speechSynthesis.speak(utterance);
+        } catch (e) {
+            setIsPlayingAudio(false);
         }
-        setLoading(false);
+    }, []);
+
+    const stopNativeAudio = useCallback(() => {
+        if (window.speechSynthesis) {
+            try { window.speechSynthesis.cancel(); } catch (e) {}
+            setIsPlayingAudio(false);
+        }
+    }, []);
+
+    const handleGetParagraph = async (selectedTopic = null) => {
+        const activeTopic = selectedTopic || topic;
+        if (!activeTopic.trim()) return;
+        setLoading(true);
+        stopNativeAudio();
+
+        try {
+            const data = await pythonAPI.get(`/api/speaking/reading/paragraph?topic=${encodeURIComponent(activeTopic)}&level=${level}`);
+            if (data && data.paragraph) {
+                setParagraphData(data);
+                setTopic(activeTopic);
+                setPhase('read');
+            } else {
+                throw new Error('Empty paragraph data');
+            }
+        } catch (err) {
+            console.warn('Paragraph API fallback triggered:', err);
+            const cleanTopic = activeTopic.trim();
+            setParagraphData({
+                paragraph: `${cleanTopic} is an essential subject to explore and understand in modern society. When studying ${cleanTopic}, we discover how core principles, practical experimentation, and dedicated focus lead to outstanding results. Practicing spoken English while reading about ${cleanTopic} improves your vocabulary, enunciation, and natural speaking rhythm. Take your time with every sentence, pronounce each syllable clearly, and maintain a calm, confident speaking pace.`,
+                wordCount: 75,
+                vocabulary: [
+                    { word: 'principles', definition: 'fundamental truths or rules that serve as the foundation for a system' },
+                    { word: 'experimentation', definition: 'the process of testing new ideas and methods' },
+                    { word: 'enunciation', definition: 'the act of pronouncing words clearly and distinctly' },
+                    { word: 'confident', definition: 'feeling or showing certainty about your own ability' }
+                ],
+                pronunciationTip: `Focus on clean consonant endings and pause naturally at commas and periods.`
+            });
+            setTopic(activeTopic);
+            setPhase('read');
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleStartRecording = () => {
+        stopNativeAudio();
         resetTranscript();
         setStartTime(Date.now());
         startListening();
@@ -122,8 +163,7 @@ export default function ReadingEngine() {
         stopListening();
         resetTranscript();
         setStartTime(Date.now());
-        // Small delay to allow the browser speech engine to clean up before restarting
-        setTimeout(() => startListening(), 250);
+        setTimeout(() => startListening(), 200);
     };
 
     const handleSubmit = async () => {
@@ -141,79 +181,120 @@ export default function ReadingEngine() {
             setPhase('result');
         } catch (err) {
             console.error('Reading evaluation failed:', err);
-            alert('Evaluation failed. Please try again.');
+            alert('Evaluation failed. Please check connection and try again.');
             setPhase('record');
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     const handleReset = () => {
-        setPhase('input'); setTopic(''); setParagraphData(null);
-        setEvaluation(null); resetTranscript();
+        stopNativeAudio();
+        setPhase('input');
+        setTopic('');
+        setParagraphData(null);
+        setEvaluation(null);
+        resetTranscript();
     };
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <AnimatePresence mode="wait">
-
                 {/* STEP 1: Choose topic + level */}
                 {phase === 'input' && (
                     <motion.div key="input" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
                         <div style={cardStyle}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-                                <BookOpen size={22} color="#60a5fa" />
+                                <div style={{
+                                    width: '42px', height: '42px', borderRadius: '10px',
+                                    background: 'linear-gradient(135deg, #60a5fa, #3b82f6)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: '22px', flexShrink: 0
+                                }}>
+                                    📖
+                                </div>
                                 <div>
-                                    <h3 style={{ fontSize: '16px', fontWeight: 700 }}>📖 Reading Practice</h3>
-                                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>AI gives you a paragraph — you read it aloud — AI scores you</p>
+                                    <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#fff', margin: 0 }}>Reading Aloud & Pronunciation Practice</h3>
+                                    <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>AI provides a factual passage on any topic — you read it aloud — AI analyzes your pronunciation and pace</p>
                                 </div>
                             </div>
 
                             {/* Topic input */}
-                            <label style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-muted)', display: 'block', marginBottom: '8px' }}>Choose Topic</label>
+                            <label style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px' }}>
+                                Enter Any Custom Topic
+                            </label>
                             <input
-                                placeholder="e.g. Climate Change, Space, AI, Health..."
-                                value={topic} onChange={(e) => setTopic(e.target.value)}
+                                placeholder="e.g. Artificial Intelligence, Climate Change, Quantum Physics, Startups, Space..."
+                                value={topic}
+                                onChange={(e) => setTopic(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleGetParagraph()}
                                 style={inputStyle}
                                 onFocus={(e) => e.target.style.borderColor = '#60a5fa'}
-                                onBlur={(e) => e.target.style.borderColor = 'transparent'}
+                                onBlur={(e) => e.target.style.borderColor = 'rgba(255, 255, 255, 0.1)'}
                             />
 
                             {/* Suggested topics */}
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '20px' }}>
-                                {SUGGESTED_TOPICS.map(t => (
-                                    <button key={t} onClick={() => setTopic(t)} style={{
-                                        padding: '6px 14px', borderRadius: 'var(--radius-pill)',
-                                        background: topic === t ? '#60a5fa22' : 'var(--bg-elevated-2)',
-                                        border: topic === t ? '1px solid #60a5fa' : '1px solid transparent',
-                                        color: topic === t ? '#60a5fa' : 'var(--text-secondary)',
-                                        fontSize: '12px', fontWeight: 700, cursor: 'pointer',
-                                        transition: 'all 0.15s',
-                                    }}>{t}</button>
-                                ))}
+                            <div style={{ marginBottom: '20px' }}>
+                                <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
+                                    Or Pick A Popular Topic:
+                                </span>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                    {SUGGESTED_TOPICS.map(t => (
+                                        <button
+                                            key={t}
+                                            onClick={() => {
+                                                setTopic(t);
+                                                handleGetParagraph(t);
+                                            }}
+                                            style={{
+                                                padding: '7px 14px',
+                                                borderRadius: '20px',
+                                                background: topic === t ? 'rgba(96, 165, 250, 0.2)' : 'var(--bg-elevated-2)',
+                                                border: topic === t ? '1px solid #60a5fa' : '1px solid rgba(255, 255, 255, 0.06)',
+                                                color: topic === t ? '#93c5fd' : 'var(--text-secondary)',
+                                                fontSize: '12px',
+                                                fontWeight: 700,
+                                                cursor: 'pointer',
+                                                transition: 'all 0.15s ease',
+                                            }}
+                                        >
+                                            {t}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
 
                             {/* Level selector */}
-                            <label style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-muted)', display: 'block', marginBottom: '10px' }}>Your English Level</label>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '20px' }}>
+                            <label style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-secondary)', display: 'block', marginBottom: '10px' }}>
+                                Select Your English Level
+                            </label>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginBottom: '20px' }}>
                                 {LEVELS.map(l => (
-                                    <div key={l.id} onClick={() => setLevel(l.id)}
+                                    <div
+                                        key={l.id}
+                                        onClick={() => setLevel(l.id)}
                                         style={{
-                                            padding: '14px 12px', borderRadius: 'var(--radius-md)', cursor: 'pointer',
-                                            background: level === l.id ? '#60a5fa1A' : 'var(--bg-elevated-2)',
-                                            border: `2px solid ${level === l.id ? '#60a5fa' : 'transparent'}`,
-                                            textAlign: 'center', transition: 'all 0.18s',
+                                            padding: '16px 14px',
+                                            borderRadius: '12px',
+                                            cursor: 'pointer',
+                                            background: level === l.id ? 'rgba(96, 165, 250, 0.15)' : 'var(--bg-elevated-2)',
+                                            border: `1.5px solid ${level === l.id ? '#60a5fa' : 'rgba(255, 255, 255, 0.06)'}`,
+                                            textAlign: 'center',
+                                            transition: 'all 0.18s ease',
                                         }}
                                     >
-                                        <div style={{ fontSize: '18px', marginBottom: '4px' }}>{l.label.split(' ')[0]}</div>
-                                        <div style={{ fontSize: '13px', fontWeight: 700, color: level === l.id ? '#60a5fa' : 'var(--text-primary)' }}>{l.label.split(' ').slice(1).join(' ')}</div>
+                                        <div style={{ fontSize: '14px', fontWeight: 800, color: level === l.id ? '#93c5fd' : '#fff' }}>{l.label}</div>
                                         <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{l.desc}</div>
                                     </div>
                                 ))}
                             </div>
 
-                            <button onClick={handleGetParagraph} disabled={!topic.trim() || loading} style={btn(!topic.trim() || loading, '#60a5fa')}>
-                                {loading ? <><Loader size={16} className="animate-spin" /> Generating paragraph...</> : <><BookOpen size={16} /> Get My Reading Paragraph</>}
+                            <button
+                                onClick={() => handleGetParagraph()}
+                                disabled={!topic.trim() || loading}
+                                style={btn(!topic.trim() || loading, 'linear-gradient(135deg, #60a5fa, #2563eb)')}
+                            >
+                                {loading ? <><Loader size={16} className="animate-spin" /> Generating Topic Passage...</> : <><BookOpen size={16} /> Generate Reading Passage</>}
                             </button>
                         </div>
                     </motion.div>
@@ -226,29 +307,55 @@ export default function ReadingEngine() {
 
                         {/* Paragraph card */}
                         <div style={cardStyle}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
-                                <BookOpen size={18} color="#60a5fa" />
-                                <div>
-                                    <h3 style={{ fontSize: '16px', fontWeight: 700 }}>📖 Read This Paragraph Aloud</h3>
-                                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Topic: <strong>{topic}</strong> · Level: <strong style={{ color: '#60a5fa', textTransform: 'capitalize' }}>{level}</strong> · {paragraphData.wordCount} words</p>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <BookOpen size={20} color="#60a5fa" />
+                                    <div>
+                                        <h3 style={{ fontSize: '17px', fontWeight: 800, color: '#fff', margin: 0 }}>Read This Paragraph Aloud</h3>
+                                        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
+                                            Topic: <strong style={{ color: '#fff' }}>{topic}</strong> · Level: <strong style={{ color: '#60a5fa', textTransform: 'capitalize' }}>{level}</strong>
+                                        </p>
+                                    </div>
                                 </div>
+
+                                <button
+                                    onClick={isPlayingAudio ? stopNativeAudio : () => playNativeAudio(paragraphData.paragraph)}
+                                    style={{
+                                        padding: '7px 14px',
+                                        borderRadius: '10px',
+                                        background: isPlayingAudio ? 'rgba(239, 68, 68, 0.2)' : 'rgba(96, 165, 250, 0.15)',
+                                        border: isPlayingAudio ? '1px solid #ef4444' : '1px solid #60a5fa',
+                                        color: isPlayingAudio ? '#f87171' : '#60a5fa',
+                                        fontSize: '12px',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '6px',
+                                    }}
+                                >
+                                    {isPlayingAudio ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                                    <span>{isPlayingAudio ? 'Stop Audio' : 'Listen Native Pronunciation'}</span>
+                                </button>
                             </div>
 
                             {/* Paragraph box */}
                             <div style={{
-                                background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: '22px',
-                                marginBottom: '16px', border: '1px solid var(--border-subtle)',
+                                background: '#121212', borderRadius: '12px', padding: '24px',
+                                marginBottom: '16px', border: '1px solid rgba(255, 255, 255, 0.08)',
                                 lineHeight: 1.9,
                             }}>
-                                <p style={{ fontSize: '16px', lineHeight: 1.9, color: 'var(--text-primary)', letterSpacing: '0.01em' }}>{paragraphData.paragraph}</p>
+                                <p style={{ fontSize: '16px', lineHeight: 1.9, color: '#fff', letterSpacing: '0.01em', margin: 0 }}>
+                                    {paragraphData.paragraph}
+                                </p>
                             </div>
 
                             {/* Pronunciation Tip */}
                             {paragraphData.pronunciationTip && (
                                 <div style={{
-                                    padding: '10px 16px', borderRadius: 'var(--radius-md)',
-                                    background: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.2)',
-                                    fontSize: '13px', color: '#60a5fa', marginBottom: '16px',
+                                    padding: '12px 16px', borderRadius: '10px',
+                                    background: 'rgba(96, 165, 250, 0.08)', border: '1px solid rgba(96, 165, 250, 0.25)',
+                                    fontSize: '13px', color: '#93c5fd', marginBottom: '16px',
                                     display: 'flex', gap: '8px', alignItems: 'flex-start',
                                 }}>
                                     <span style={{ flexShrink: 0 }}>💡</span>
@@ -256,23 +363,49 @@ export default function ReadingEngine() {
                                 </div>
                             )}
 
-                            <button onClick={handleStartRecording} style={btn(false, 'var(--success)')}>
-                                <Mic size={16} /> Start Reading Aloud
-                            </button>
+                            <div style={{ display: 'flex', gap: '10px' }}>
+                                <button
+                                    onClick={handleStartRecording}
+                                    style={{
+                                        ...btn(false, 'linear-gradient(135deg, #10b981, #059669)'),
+                                        flex: 1,
+                                    }}
+                                >
+                                    <Mic size={16} /> Start Reading Aloud
+                                </button>
+                                <button
+                                    onClick={handleReset}
+                                    style={{
+                                        padding: '14px 20px',
+                                        borderRadius: '12px',
+                                        background: 'rgba(255, 255, 255, 0.08)',
+                                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                                        color: '#fff',
+                                        fontSize: '13px',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    Choose Another Topic
+                                </button>
+                            </div>
                         </div>
 
                         {/* Vocabulary hints */}
                         {paragraphData.vocabulary?.length > 0 && (
                             <div style={cardStyle}>
-                                <p style={{ fontSize: '13px', fontWeight: 700, marginBottom: '12px', color: 'var(--text-secondary)' }}>📚 Key Vocabulary</p>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                <p style={{ fontSize: '13px', fontWeight: 800, marginBottom: '12px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                    📚 Key Vocabulary Words
+                                </p>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px' }}>
                                     {paragraphData.vocabulary.map((v, i) => (
                                         <div key={i} style={{
-                                            display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '10px 14px',
-                                            background: 'var(--bg-elevated-2)', borderRadius: 'var(--radius-md)',
+                                            display: 'flex', flexDirection: 'column', gap: '4px', padding: '12px 14px',
+                                            background: 'var(--bg-elevated-2)', borderRadius: '10px',
+                                            border: '1px solid rgba(255, 255, 255, 0.06)',
                                         }}>
-                                            <span style={{ fontWeight: 800, color: '#60a5fa', minWidth: '90px', fontSize: '13px' }}>{v.word}</span>
-                                            <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{v.definition}</span>
+                                            <span style={{ fontWeight: 800, color: '#60a5fa', fontSize: '13.5px' }}>{v.word}</span>
+                                            <span style={{ fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>{v.definition}</span>
                                         </div>
                                     ))}
                                 </div>
@@ -291,52 +424,52 @@ export default function ReadingEngine() {
                             <div style={{
                                 width: '64px', height: '64px', margin: '0 auto 12px',
                                 borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                background: isListening ? 'var(--error)' : 'var(--bg-elevated-3)',
-                                boxShadow: isListening ? '0 0 0 10px rgba(241,94,108,0.12)' : 'none',
-                                animation: isListening ? 'pulse-record 1.5s infinite' : 'none',
+                                background: isListening ? '#ef4444' : 'var(--bg-elevated-3)',
+                                boxShadow: isListening ? '0 0 20px rgba(239, 68, 68, 0.5)' : 'none',
                                 transition: 'all 0.3s',
                             }}>
                                 {isListening ? <Mic size={28} color="#fff" /> : <MicOff size={28} color="var(--text-muted)" />}
                             </div>
-                            <p style={{ fontWeight: 700, fontSize: '14px', color: isListening ? 'var(--error)' : 'var(--text-muted)', marginBottom: '4px' }}>
-                                {isListening ? '🔴 Reading aloud...' : '⏹️ Microphone stopped'}
+                            <p style={{ fontWeight: 800, fontSize: '15px', color: isListening ? '#f87171' : 'var(--text-muted)', marginBottom: '4px' }}>
+                                {isListening ? '🔴 Reading aloud... Speak clearly' : '⏹️ Microphone stopped'}
                             </p>
-                            <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Read the paragraph below clearly and at a steady pace</p>
+                            <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)' }}>Read the paragraph below at a steady pace</p>
                         </div>
 
                         {/* Paragraph with word highlighting */}
-                        <div style={{ ...cardStyle }}>
-                            <p style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '14px', letterSpacing: '1px', textTransform: 'uppercase' }}>
-                                Read this — green = matched ✓
+                        <div style={cardStyle}>
+                            <p style={{ fontSize: '11px', fontWeight: 800, color: '#10b981', marginBottom: '12px', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                                ✓ Green highlights words detected accurately
                             </p>
                             <div style={{
-                                background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: '20px',
-                                border: '1px solid var(--border-subtle)', marginBottom: '16px',
+                                background: '#121212', borderRadius: '12px', padding: '22px',
+                                border: '1px solid rgba(255, 255, 255, 0.08)', marginBottom: '16px',
                             }}>
                                 <HighlightedParagraph paragraph={paragraphData.paragraph} spokenWords={spokenWords} />
                             </div>
 
                             {/* Live spoken text */}
                             <div style={{
-                                background: 'var(--bg-elevated-2)', borderRadius: 'var(--radius-md)',
-                                padding: '12px 16px', minHeight: '48px', marginBottom: '16px', fontSize: '13px',
+                                background: 'var(--bg-elevated-2)', borderRadius: '10px',
+                                padding: '14px 16px', minHeight: '48px', marginBottom: '16px', fontSize: '13.5px',
+                                border: '1px solid rgba(255, 255, 255, 0.06)',
                             }}>
-                                <span style={{ color: 'var(--text-primary)' }}>{transcript}</span>
-                                <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>{interimTranscript}</span>
-                                {!transcript && !interimTranscript && <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Your speech will appear here...</span>}
+                                <span style={{ color: '#fff' }}>{transcript} </span>
+                                <span style={{ color: '#93c5fd', fontStyle: 'italic' }}>{interimTranscript}</span>
+                                {!transcript && !interimTranscript && <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Your speech will appear here in real-time...</span>}
                             </div>
 
                             <div style={{ display: 'flex', gap: '12px' }}>
                                 <button onClick={handleRestartRecording} style={{
-                                    flex: 1, padding: '12px', borderRadius: 'var(--radius-pill)',
-                                    background: 'transparent', border: '1px solid #727272',
-                                    color: 'var(--text-primary)', fontSize: '13px', fontWeight: 700,
+                                    flex: 1, padding: '12px', borderRadius: '10px',
+                                    background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.1)',
+                                    color: '#fff', fontSize: '13px', fontWeight: 700,
                                     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
                                 }}>
                                     <RotateCcw size={14} /> Restart
                                 </button>
-                                <button onClick={handleSubmit} disabled={!transcript || loading} style={{ ...btn(!transcript || loading), flex: 1, width: 'auto' }}>
-                                    <Send size={14} /> {loading ? 'Scoring...' : 'Submit Reading'}
+                                <button onClick={handleSubmit} disabled={!transcript || loading} style={{ ...btn(!transcript || loading, '#10b981'), flex: 1, width: 'auto' }}>
+                                    <Send size={14} /> {loading ? 'Scoring Accuracy...' : 'Submit Reading'}
                                 </button>
                             </div>
                         </div>
@@ -354,8 +487,8 @@ export default function ReadingEngine() {
                             <button onClick={() => { setPhase('read'); resetTranscript(); }} style={{ ...btn(false, '#60a5fa'), flex: 1, width: 'auto' }}>
                                 🔁 Read Again
                             </button>
-                            <button onClick={handleReset} style={{ ...btn(), flex: 1, width: 'auto' }}>
-                                📖 New Paragraph
+                            <button onClick={handleReset} style={{ ...btn(false, '#10b981'), flex: 1, width: 'auto' }}>
+                                📖 Choose New Topic
                             </button>
                         </div>
                     </motion.div>
