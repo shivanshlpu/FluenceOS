@@ -3,9 +3,14 @@ import Sidebar from './Sidebar';
 import Navbar from './Navbar';
 import BottomBar from './BottomBar';
 import ErrorBoundary from '../ui/ErrorBoundary';
+import { useActiveTimeTracker } from '../../hooks/useActiveTimeTracker';
 
 export default function Layout() {
+    // Automatically tracks live active app usage time across all routes
+    useActiveTimeTracker();
+
     return (
+
         <div className="app-layout">
             <div className="app-sidebar">
                 <Sidebar />

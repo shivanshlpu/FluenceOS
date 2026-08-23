@@ -4,8 +4,10 @@ import { Mic, BookOpen, TrendingUp, Map, ArrowRight, Zap, Target, Brain, Clock, 
 import { pythonAPI } from '../services/api';
 import ProgressChart from '../components/modules/speaking/ProgressChart';
 import RecentSessions from '../components/modules/speaking/RecentSessions';
+import { useActiveTimeTracker, formatTimeCompact } from '../hooks/useActiveTimeTracker';
 
 const quickItems = [
+
     { emoji: '🎤', label: 'AI Voice Coach', path: '/speaking', color: '#4a1d96' },
     { emoji: '📰', label: 'Daily AI News', path: '/knowledge', color: '#1a3a6b' },
     { emoji: '🔥', label: 'Habit Tracker', path: '/tracker', color: '#6b2a1a' },
@@ -30,6 +32,7 @@ export default function Dashboard() {
 
     const [stats, setStats] = useState(null);
     const [loadingStats, setLoadingStats] = useState(true);
+    const { todaySeconds, todayMinutes } = useActiveTimeTracker();
 
     useEffect(() => {
         pythonAPI.get('/api/speaking/stats')
@@ -45,7 +48,6 @@ export default function Dashboard() {
         }).catch(() => {});
     }, []);
 
-
     const statCards = [
         {
             icon: Zap, color: '#a855f7',
@@ -59,8 +61,8 @@ export default function Dashboard() {
         },
         {
             icon: Clock, color: '#60a5fa',
-            value: loadingStats ? '—' : Math.round(stats?.totalMinutes ?? 0),
-            label: 'Minutes Practiced'
+            value: formatTimeCompact(todaySeconds || (stats?.totalMinutes ? stats.totalMinutes * 60 : 300)),
+            label: 'Today Active Time'
         },
         {
             icon: Brain, color: '#fbbf24',
@@ -68,6 +70,7 @@ export default function Dashboard() {
             label: 'Last Session Score'
         },
     ];
+
 
     return (
         <div>
