@@ -1,9 +1,11 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useSpeechRecognition } from '../../../hooks/useSpeechRecognition';
+import { speakAIResponse, stopAllSpeech, getVoiceSettings } from '../../../services/voiceService';
+import VoiceSettingsModal from './VoiceSettingsModal';
 import { pythonAPI } from '../../../services/api';
 import FeedbackCard from './FeedbackCard';
 import ReadingFeedbackCard from './ReadingFeedbackCard';
-import { BookOpen, Mic, MicOff, RotateCcw, Send, Sparkles, ChevronDown, Loader, Volume2, VolumeX, Play } from 'lucide-react';
+import { BookOpen, Mic, MicOff, RotateCcw, Send, Sparkles, ChevronDown, Loader, Volume2, VolumeX, Play, Settings2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const cardStyle = { background: 'var(--bg-elevated-1)', borderRadius: '16px', padding: '24px', border: '1px solid rgba(255, 255, 255, 0.08)' };
@@ -86,33 +88,25 @@ export default function ReadingEngine() {
     const [evaluation, setEvaluation] = useState(null);
     const [startTime, setStartTime] = useState(null);
     const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+    const [showVoiceModal, setShowVoiceModal] = useState(false);
+    const [voiceSettings, setVoiceSettings] = useState(getVoiceSettings());
 
     const { transcript, interimTranscript, isListening, startListening, stopListening, resetTranscript } = useSpeechRecognition();
 
     const spokenWords = useMemo(() => transcript.trim().split(/\s+/).filter(Boolean), [transcript]);
 
     const playNativeAudio = useCallback((text) => {
-        if (!window.speechSynthesis || !text) return;
-        try {
-            window.speechSynthesis.cancel();
-            window.speechSynthesis.resume();
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = 'en-US';
-            utterance.rate = 0.9;
-            utterance.onstart = () => setIsPlayingAudio(true);
-            utterance.onend = () => setIsPlayingAudio(false);
-            utterance.onerror = () => setIsPlayingAudio(false);
-            window.speechSynthesis.speak(utterance);
-        } catch (e) {
-            setIsPlayingAudio(false);
-        }
+        if (!text) return;
+        speakAIResponse(
+            text,
+            () => setIsPlayingAudio(true),
+            () => setIsPlayingAudio(false)
+        );
     }, []);
 
     const stopNativeAudio = useCallback(() => {
-        if (window.speechSynthesis) {
-            try { window.speechSynthesis.cancel(); } catch (e) {}
-            setIsPlayingAudio(false);
-        }
+        stopAllSpeech();
+        setIsPlayingAudio(false);
     }, []);
 
     const handleGetParagraph = async (selectedTopic = null) => {
@@ -318,25 +312,48 @@ export default function ReadingEngine() {
                                     </div>
                                 </div>
 
-                                <button
-                                    onClick={isPlayingAudio ? stopNativeAudio : () => playNativeAudio(paragraphData.paragraph)}
-                                    style={{
-                                        padding: '7px 14px',
-                                        borderRadius: '10px',
-                                        background: isPlayingAudio ? 'rgba(239, 68, 68, 0.2)' : 'rgba(96, 165, 250, 0.15)',
-                                        border: isPlayingAudio ? '1px solid #ef4444' : '1px solid #60a5fa',
-                                        color: isPlayingAudio ? '#f87171' : '#60a5fa',
-                                        fontSize: '12px',
-                                        fontWeight: 700,
-                                        cursor: 'pointer',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '6px',
-                                    }}
-                                >
-                                    {isPlayingAudio ? <VolumeX size={14} /> : <Volume2 size={14} />}
-                                    <span>{isPlayingAudio ? 'Stop Audio' : 'Listen Native Pronunciation'}</span>
-                                </button>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <button
+                                        onClick={() => setShowVoiceModal(true)}
+                                        title="Configure Voice Engine"
+                                        style={{
+                                            padding: '7px 12px',
+                                            borderRadius: '10px',
+                                            background: voiceSettings.engine === 'cloud' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(96, 165, 250, 0.15)',
+                                            border: `1px solid ${voiceSettings.engine === 'cloud' ? '#a855f7' : '#60a5fa'}`,
+                                            color: voiceSettings.engine === 'cloud' ? '#c084fc' : '#93c5fd',
+                                            fontSize: '12px',
+                                            fontWeight: 700,
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '5px',
+                                        }}
+                                    >
+                                        <Settings2 size={14} />
+                                        <span>{voiceSettings.engine === 'cloud' ? '⚡ Cloud Voice' : '🌐 Browser Voice'}</span>
+                                    </button>
+
+                                    <button
+                                        onClick={isPlayingAudio ? stopNativeAudio : () => playNativeAudio(paragraphData.paragraph)}
+                                        style={{
+                                            padding: '7px 14px',
+                                            borderRadius: '10px',
+                                            background: isPlayingAudio ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.15)',
+                                            border: isPlayingAudio ? '1px solid #ef4444' : '1px solid #10b981',
+                                            color: isPlayingAudio ? '#f87171' : '#34d399',
+                                            fontSize: '12px',
+                                            fontWeight: 700,
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '6px',
+                                        }}
+                                    >
+                                        {isPlayingAudio ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                                        <span>{isPlayingAudio ? 'Stop Audio' : 'Listen Pronunciation'}</span>
+                                    </button>
+                                </div>
                             </div>
 
                             {/* Paragraph box */}
@@ -494,6 +511,13 @@ export default function ReadingEngine() {
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {/* Voice Settings Modal */}
+            <VoiceSettingsModal
+                isOpen={showVoiceModal}
+                onClose={() => setShowVoiceModal(false)}
+                onSettingsChange={s => setVoiceSettings(s)}
+            />
         </div>
     );
 }

@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Volume2, VolumeX, RefreshCw, Sparkles, Send, Award, CheckCircle2, AlertCircle, Play, Square, MessageSquare, Mic, MicOff, RotateCcw, Bot, User, Check, Lightbulb } from 'lucide-react';
+import { Volume2, VolumeX, RefreshCw, Sparkles, Send, Award, CheckCircle2, AlertCircle, Play, Square, MessageSquare, Mic, MicOff, RotateCcw, Bot, User, Check, Lightbulb, Settings2 } from 'lucide-react';
 import { useSpeechRecognition } from '../../../hooks/useSpeechRecognition';
+import { speakAIResponse, stopAllSpeech, getVoiceSettings } from '../../../services/voiceService';
+import VoiceSettingsModal from './VoiceSettingsModal';
 import { pythonAPI } from '../../../services/api';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -47,6 +49,8 @@ export default function ConversationEngine() {
     const [autoSpeak, setAutoSpeak] = useState(true);
     const [hasStarted, setHasStarted] = useState(false);
     const [stats, setStats] = useState({ wpm: 0, fillerCount: 0, totalWords: 0 });
+    const [showVoiceModal, setShowVoiceModal] = useState(false);
+    const [voiceSettings, setVoiceSettings] = useState(getVoiceSettings());
 
     const messagesEndRef = useRef(null);
     const speechStartTimeRef = useRef(null);
@@ -66,9 +70,7 @@ export default function ConversationEngine() {
         isMountedRef.current = true;
         return () => {
             isMountedRef.current = false;
-            if (window.speechSynthesis) {
-                try { window.speechSynthesis.cancel(); } catch (e) {}
-            }
+            stopAllSpeech();
         };
     }, []);
 
@@ -97,61 +99,21 @@ export default function ConversationEngine() {
         }
     }, [transcript, interimTranscript, isListening]);
 
-    // TTS Voice Synthesizer
-    const speakText = useCallback((text, onFinish = null) => {
-        if (!window.speechSynthesis || !text) {
-            if (onFinish) onFinish();
-            return;
-        }
-
-        try {
-            window.speechSynthesis.cancel();
-            window.speechSynthesis.resume();
-
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = 'en-US';
-            utterance.rate = 0.95;
-            utterance.pitch = 1.0;
-
-            const voices = window.speechSynthesis.getVoices?.() || [];
-            const preferredVoice = voices.find(v =>
-                v.lang.startsWith('en') &&
-                (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Jenny') || v.name.includes('David'))
-            ) || voices.find(v => v.lang.startsWith('en'));
-
-            if (preferredVoice) utterance.voice = preferredVoice;
-
-            utterance.onstart = () => {
-                if (isMountedRef.current) setIsSpeakingAI(true);
-            };
-
-            utterance.onend = () => {
-                if (isMountedRef.current) {
-                    setIsSpeakingAI(false);
-                    if (onFinish) onFinish();
-                }
-            };
-
-            utterance.onerror = () => {
-                if (isMountedRef.current) {
-                    setIsSpeakingAI(false);
-                    if (onFinish) onFinish();
-                }
-            };
-
-            window.speechSynthesis.speak(utterance);
-        } catch (e) {
-            console.warn('[TTS] Speech synthesis error:', e);
-            if (isMountedRef.current) setIsSpeakingAI(false);
-            if (onFinish) onFinish();
-        }
+    // Master Speak Function
+    const playAI = useCallback((text, onFinish = null) => {
+        speakAIResponse(
+            text,
+            () => { if (isMountedRef.current) setIsSpeakingAI(true); },
+            () => {
+                if (isMountedRef.current) setIsSpeakingAI(false);
+                if (onFinish) onFinish();
+            }
+        );
     }, []);
 
     const stopSpeakingAI = () => {
-        if (window.speechSynthesis) {
-            try { window.speechSynthesis.cancel(); } catch (e) {}
-            if (isMountedRef.current) setIsSpeakingAI(false);
-        }
+        stopAllSpeech();
+        if (isMountedRef.current) setIsSpeakingAI(false);
     };
 
     // Start Session
@@ -170,7 +132,7 @@ export default function ConversationEngine() {
         setHasStarted(true);
 
         if (autoSpeak) {
-            speakText(scenario.initialPrompt, () => {
+            playAI(scenario.initialPrompt, () => {
                 if (isMountedRef.current) {
                     speechStartTimeRef.current = Date.now();
                     startListening();
@@ -232,7 +194,7 @@ export default function ConversationEngine() {
                 });
 
                 if (autoSpeak) {
-                    speakText(aiReply, () => {
+                    playAI(aiReply, () => {
                         if (isMountedRef.current && hasStarted) {
                             speechStartTimeRef.current = Date.now();
                             startListening();
@@ -246,7 +208,7 @@ export default function ConversationEngine() {
                 const fallbackReply = "That makes sense! How did you handle the challenges that came with that?";
                 setMessages(prev => [...prev, { role: 'assistant', content: fallbackReply }]);
                 if (autoSpeak) {
-                    speakText(fallbackReply, () => {
+                    playAI(fallbackReply, () => {
                         speechStartTimeRef.current = Date.now();
                         startListening();
                     });
@@ -308,6 +270,28 @@ export default function ConversationEngine() {
                         <option value="Advanced">Advanced Level</option>
                     </select>
 
+                    {/* Voice Engine Toggle & Settings */}
+                    <button
+                        onClick={() => setShowVoiceModal(true)}
+                        title="Configure AI Voice / Switch between Browser and Cloud Voice"
+                        style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            background: voiceSettings.engine === 'cloud' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(16, 185, 129, 0.15)',
+                            border: `1px solid ${voiceSettings.engine === 'cloud' ? '#a855f7' : '#10b981'}`,
+                            color: voiceSettings.engine === 'cloud' ? '#c084fc' : '#34d399',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                        }}
+                    >
+                        <Settings2 size={15} />
+                        <span>{voiceSettings.engine === 'cloud' ? '⚡ Cloud Voice' : '🌐 Browser Voice'}</span>
+                    </button>
+
                     <button
                         onClick={() => setAutoSpeak(!autoSpeak)}
                         title={autoSpeak ? 'Voice Audio Output Enabled' : 'Voice Audio Muted'}
@@ -326,10 +310,17 @@ export default function ConversationEngine() {
                         }}
                     >
                         {autoSpeak ? <Volume2 size={15} /> : <VolumeX size={15} />}
-                        <span>{autoSpeak ? 'AI Voice ON' : 'AI Voice OFF'}</span>
+                        <span>{autoSpeak ? 'Voice ON' : 'Voice OFF'}</span>
                     </button>
                 </div>
             </div>
+
+            {/* Voice Settings Modal */}
+            <VoiceSettingsModal
+                isOpen={showVoiceModal}
+                onClose={() => setShowVoiceModal(false)}
+                onSettingsChange={s => setVoiceSettings(s)}
+            />
 
             {/* Scenario Selector when idle */}
             {!hasStarted ? (
@@ -510,7 +501,7 @@ export default function ConversationEngine() {
                                             {/* Audio replay button on AI message */}
                                             {!isUser && (
                                                 <button
-                                                    onClick={() => speakText(msg.content)}
+                                                    onClick={() => playAI(msg.content)}
                                                     style={{
                                                         marginTop: '6px',
                                                         background: 'transparent',
