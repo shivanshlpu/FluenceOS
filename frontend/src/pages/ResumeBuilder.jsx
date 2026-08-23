@@ -40,7 +40,9 @@ export const ResumeBuilder = () => {
   const [cvType, setCvType] = useState(initialMeta.cvType || 'specialized'); // 'specialized' | 'general' | 'executive'
   const [activeStep, setActiveStep] = useState(initialMeta.activeStep || 'personal'); // 'personal' | 'skills' | 'experience' | 'projects' | 'training' | 'education'
   const [mobileMode, setMobileMode] = useState('edit'); // 'edit' | 'preview'
-  const [scale, setScale] = useState(1);
+  const [scale, setScale] = useState(0.85);
+  const [zoomMultiplier, setZoomMultiplier] = useState(1);
+  const [pageHeight, setPageHeight] = useState(1123);
   const [atsScore, setAtsScore] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -48,6 +50,39 @@ export const ResumeBuilder = () => {
   const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'saving' | 'synced'
 
   const previewWrapperRef = useRef(null);
+  const innerResumeRef = useRef(null);
+  const A4_STANDARD_WIDTH = 794;
+
+  const calculateResponsiveScale = useCallback(() => {
+    if (!previewWrapperRef.current) return;
+    const containerWidth = previewWrapperRef.current.clientWidth - 28; // Account for container padding
+    if (containerWidth <= 0) return;
+    const autoScale = Math.min(1.0, containerWidth / A4_STANDARD_WIDTH);
+    setScale(autoScale * zoomMultiplier);
+
+    if (innerResumeRef.current) {
+      setPageHeight(innerResumeRef.current.offsetHeight || 1123);
+    }
+  }, [zoomMultiplier]);
+
+  useEffect(() => {
+    calculateResponsiveScale();
+    const handleResize = () => calculateResponsiveScale();
+    window.addEventListener('resize', handleResize);
+
+    const observer = new ResizeObserver(() => {
+      calculateResponsiveScale();
+    });
+    if (previewWrapperRef.current) {
+      observer.observe(previewWrapperRef.current);
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      observer.disconnect();
+    };
+  }, [calculateResponsiveScale, mobileMode, cvType, resumeData]);
+
 
   // Persistence effect: Auto-save to localStorage & debounced sync to backend
   useEffect(() => {
@@ -1038,17 +1073,69 @@ export const ResumeBuilder = () => {
           ref={previewWrapperRef}
           className={`preview-column-container ${mobileMode === 'edit' ? 'hide-on-mobile' : ''}`}
         >
+          {/* Zoom & Fit Toolbar */}
+          <div className="preview-controls-bar">
+            <div className="preview-controls-left">
+              <span>📄 A4 Live Preview</span>
+              <span className="preview-zoom-badge">
+                {Math.round(scale * 100)}% {zoomMultiplier === 1 ? '(Fit)' : ''}
+              </span>
+            </div>
+
+            <div className="preview-controls-right">
+              <button
+                type="button"
+                className="preview-zoom-btn"
+                onClick={() => setZoomMultiplier(prev => Math.max(0.4, +(prev - 0.1).toFixed(2)))}
+                title="Zoom Out"
+              >
+                −
+              </button>
+              <button
+                type="button"
+                className="preview-zoom-btn"
+                onClick={() => setZoomMultiplier(1)}
+                title="Fit to Screen"
+              >
+                Fit
+              </button>
+              <button
+                type="button"
+                className="preview-zoom-btn"
+                onClick={() => setZoomMultiplier(prev => Math.min(1.8, +(prev + 0.1).toFixed(2)))}
+                title="Zoom In"
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          {/* Scaled A4 Container */}
           <div
             className="preview-scaler-box"
             style={{
-              transform: `scale(${scale})`,
-              transformOrigin: 'top center'
+              width: `${Math.round(A4_STANDARD_WIDTH * scale)}px`,
+              height: `${Math.round((pageHeight || 1123) * scale)}px`,
+              position: 'relative',
             }}
           >
-            <DynamicCVRenderer cvType={cvType} data={resumeData} />
+            <div
+              ref={innerResumeRef}
+              style={{
+                transform: `scale(${scale})`,
+                transformOrigin: 'top left',
+                width: `${A4_STANDARD_WIDTH}px`,
+                position: 'absolute',
+                left: 0,
+                top: 0,
+              }}
+            >
+              <DynamicCVRenderer cvType={cvType} data={resumeData} />
+            </div>
           </div>
         </div>
       </div>
     </div>
   );
 };
+

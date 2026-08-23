@@ -466,17 +466,83 @@
   background: #0c0a14;
   border: 1px solid #201a33;
   border-radius: 14px;
-  padding: 12px;
+  padding: 16px 12px;
   display: flex;
-  justify-content: center;
-  overflow: hidden;
+  flex-direction: column;
+  align-items: center;
+  overflow-x: auto;
+  overflow-y: auto;
   min-height: 800px;
   width: 100%;
   box-sizing: border-box;
 }
 
+.preview-controls-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: #161325;
+  border: 1px solid #292344;
+  border-radius: 10px;
+  box-sizing: border-box;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preview-controls-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #c4c0e0;
+}
+
+.preview-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.preview-zoom-btn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: #251f3b;
+  border: 1px solid #3b325c;
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.preview-zoom-btn:hover {
+  background: #362c55;
+  border-color: #8b5cf6;
+}
+
+.preview-zoom-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #a78bfa;
+  padding: 3px 8px;
+  background: rgba(139, 92, 246, 0.15);
+  border-radius: 6px;
+}
+
 .preview-scaler-box {
-  transition: transform 0.2s ease;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  transition: width 0.15s ease, height 0.15s ease;
+  flex-shrink: 0;
+  margin: 0 auto;
 }
 
 /* Mobile Breakpoints */
@@ -498,10 +564,11 @@
   }
 
   .preview-column-container {
-    padding: 8px 2px;
+    padding: 10px 4px;
     min-height: auto;
   }
 }
+
 
 /* =========================================================
    STRICT PRINT CLEANUP (Hides all app UI, prints ONLY resume)

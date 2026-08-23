@@ -1,20 +1,24 @@
 /* =========================================================
    A4 PRINT & SCREEN TEMPLATE STYLES
-   Adheres to standard A4 (210mm width) with clean multi-page flow
+   Pixel-perfect standard A4 (794px / 210mm) with responsive flow
    ========================================================= */
 
-/* Common A4 Base */
+/* Common A4 Base for Screen & Preview */
 .ats-resume-page,
 .general-cv-page,
 .executive-cv-page {
-  width: 210mm;
-  min-height: 297mm;
-  padding: 12mm 16mm;
+  width: 794px;
+  min-height: 1123px;
+  padding: 40px 48px;
   background-color: #ffffff;
   color: #111111;
   box-sizing: border-box;
   margin: 0 auto;
   text-align: left;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  border-radius: 4px;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 /* Page Break & Anti-Text-Slicing Guards */
@@ -43,85 +47,99 @@
    1. SPECIALIZED TECH / AI CV (Rulebook Standard)
    ========================================================= */
 .ats-resume-page {
-  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
-  font-size: 9.2pt;
-  line-height: 1.32;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, "Helvetica Neue", sans-serif;
+  font-size: 9.5pt;
+  line-height: 1.35;
 }
 .ats-header {
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 .ats-name {
-  font-size: 18pt;
+  font-size: 19pt;
   font-weight: 700;
   margin: 0 0 3px 0;
   color: #000;
+  letter-spacing: -0.01em;
 }
 .ats-contact-split {
   display: flex;
   justify-content: space-between;
-  font-size: 8.5pt;
-  line-height: 1.25;
+  align-items: flex-start;
+  font-size: 8.8pt;
+  line-height: 1.3;
+  gap: 12px;
+}
+.ats-contact-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .ats-contact-left a,
 .ats-tag-link,
 .ats-cert-link {
   color: #0033aa;
   text-decoration: underline;
+  word-break: break-all;
 }
 .ats-contact-right {
   text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: nowrap;
 }
 .ats-section {
-  margin-top: 6px;
+  margin-top: 8px;
 }
 .ats-section-title {
-  font-size: 9.8pt;
+  font-size: 10pt;
   font-weight: 700;
   text-transform: uppercase;
-  border-bottom: 1px solid #111;
-  padding-bottom: 1.5px;
-  margin: 0 0 3px 0;
+  border-bottom: 1.5px solid #111;
+  padding-bottom: 2px;
+  margin: 0 0 4px 0;
   letter-spacing: 0.5px;
 }
 .ats-skill-line {
-  font-size: 8.8pt;
-  margin-bottom: 1.5px;
-  line-height: 1.25;
+  font-size: 9pt;
+  margin-bottom: 2.5px;
+  line-height: 1.3;
 }
 .ats-bold-label {
   font-weight: 700;
 }
 .ats-entry {
-  margin-bottom: 5px;
+  margin-bottom: 6px;
 }
 .ats-entry-header {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  font-size: 8.8pt;
+  font-size: 9pt;
+  gap: 8px;
 }
 .ats-entry-title {
-  font-size: 9pt;
+  font-size: 9.2pt;
 }
 .ats-entry-date {
-  font-size: 8.4pt;
+  font-size: 8.6pt;
   color: #222;
   white-space: nowrap;
-  font-weight: 500;
+  font-weight: 600;
 }
 .ats-bullets {
-  margin: 2px 0 2px 14px;
+  margin: 2px 0 2px 16px;
   padding: 0;
 }
 .ats-bullets li {
-  font-size: 8.6pt;
-  margin-bottom: 1.5px;
-  line-height: 1.24;
+  font-size: 8.8pt;
+  margin-bottom: 2px;
+  line-height: 1.3;
 }
 .ats-tech-line {
-  font-size: 8.2pt;
+  font-size: 8.4pt;
   color: #222;
-  margin-top: 1px;
+  margin-top: 2px;
 }
 .ats-tech-label {
   font-weight: 700;
@@ -129,22 +147,24 @@
 .ats-single-line-entry {
   display: flex;
   justify-content: space-between;
-  font-size: 8.6pt;
-  margin-bottom: 2px;
-  line-height: 1.22;
+  align-items: baseline;
+  font-size: 8.8pt;
+  margin-bottom: 3px;
+  line-height: 1.25;
+  gap: 8px;
 }
 .ats-edu-entry {
-  margin-bottom: 3px;
+  margin-bottom: 4px;
 }
 .ats-edu-sub {
-  font-size: 8.6pt;
+  font-size: 8.8pt;
 }
 
 /* =========================================================
    2. GENERAL / CLASSIC ATS CV
    ========================================================= */
 .general-cv-page {
-  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", 'Helvetica Neue', Helvetica, Arial, sans-serif;
   font-size: 9.6pt;
   line-height: 1.35;
 }
@@ -194,6 +214,7 @@
   display: flex;
   justify-content: space-between;
   font-size: 9.2pt;
+  gap: 8px;
 }
 .gen-row.sub {
   font-size: 8.8pt;
@@ -207,13 +228,13 @@
   margin-top: 1px;
 }
 .gen-bullets {
-  margin: 2px 0 4px 15px;
+  margin: 2px 0 4px 16px;
   padding: 0;
 }
 .gen-bullets li {
   font-size: 8.8pt;
-  margin-bottom: 1.5px;
-  line-height: 1.25;
+  margin-bottom: 2px;
+  line-height: 1.28;
 }
 .gen-skills-grid {
   display: flex;
@@ -253,7 +274,7 @@
   font-size: 8.8pt;
   color: #555;
   margin-top: 4px;
-  font-family: Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif;
 }
 .exec-contact a {
   color: #0033aa;
@@ -283,6 +304,7 @@
   display: flex;
   justify-content: space-between;
   font-size: 9.4pt;
+  gap: 8px;
 }
 .exec-company {
   font-size: 8.8pt;
@@ -293,11 +315,11 @@
 .exec-date {
   font-size: 8.6pt;
   color: #333;
-  font-family: Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif;
   white-space: nowrap;
 }
 .exec-bullets {
-  margin: 2px 0 4px 15px;
+  margin: 2px 0 4px 16px;
   padding: 0;
 }
 .exec-bullets li {
@@ -314,6 +336,7 @@
   justify-content: space-between;
   font-size: 9pt;
   margin-bottom: 2px;
+  gap: 8px;
 }
 .exec-edu-row.sub {
   font-size: 8.6pt;
