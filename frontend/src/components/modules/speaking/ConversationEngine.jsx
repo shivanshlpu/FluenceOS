@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Volume2, VolumeX, RefreshCw, Sparkles, Send, Award, CheckCircle2, AlertCircle, Play, Square, MessageSquare, Mic, MicOff, RotateCcw, Bot, User, Check, Lightbulb } from 'lucide-react';
+import { useSpeechRecognition } from '../../../hooks/useSpeechRecognition';
 import { pythonAPI } from '../../../services/api';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -40,33 +41,33 @@ export default function ConversationEngine() {
     const [selectedScenario, setSelectedScenario] = useState(SCENARIOS[0]);
     const [difficulty, setDifficulty] = useState('Intermediate');
     const [messages, setMessages] = useState([]);
-    const [isListening, setIsListening] = useState(false);
     const [isSpeakingAI, setIsSpeakingAI] = useState(false);
-    const [currentTranscript, setCurrentTranscript] = useState('');
-    const [interimText, setInterimText] = useState('');
     const [textInput, setTextInput] = useState('');
     const [loadingAI, setLoadingAI] = useState(false);
     const [autoSpeak, setAutoSpeak] = useState(true);
     const [hasStarted, setHasStarted] = useState(false);
     const [stats, setStats] = useState({ wpm: 0, fillerCount: 0, totalWords: 0 });
 
-    const recognitionRef = useRef(null);
     const messagesEndRef = useRef(null);
     const speechStartTimeRef = useRef(null);
     const isMountedRef = useRef(true);
-    const silenceTimeoutRef = useRef(null);
+
+    const {
+        transcript,
+        interimTranscript,
+        isListening,
+        startListening,
+        stopListening,
+        resetTranscript
+    } = useSpeechRecognition();
 
     // Clean unmount
     useEffect(() => {
         isMountedRef.current = true;
         return () => {
             isMountedRef.current = false;
-            if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
             if (window.speechSynthesis) {
                 try { window.speechSynthesis.cancel(); } catch (e) {}
-            }
-            if (recognitionRef.current) {
-                try { recognitionRef.current.abort ? recognitionRef.current.abort() : recognitionRef.current.stop(); } catch (e) {}
             }
         };
     }, []);
@@ -74,7 +75,27 @@ export default function ConversationEngine() {
     // Scroll to bottom on new message
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, currentTranscript, interimText, loadingAI]);
+    }, [messages, transcript, interimTranscript, loadingAI]);
+
+    // Live Stats calculation
+    useEffect(() => {
+        const currentSpoken = (transcript + ' ' + interimTranscript).trim();
+        if (currentSpoken && speechStartTimeRef.current && isListening) {
+            const elapsedMin = (Date.now() - speechStartTimeRef.current) / 60000;
+            const words = currentSpoken.split(/\s+/).filter(Boolean);
+            const wpm = elapsedMin > 0.05 ? Math.round(words.length / elapsedMin) : 0;
+
+            let fillers = 0;
+            const lower = currentSpoken.toLowerCase();
+            FILLER_WORDS.forEach(fw => {
+                const regex = new RegExp(`\\b${fw}\\b`, 'gi');
+                const matches = lower.match(regex);
+                if (matches) fillers += matches.length;
+            });
+
+            setStats({ wpm, fillerCount: fillers, totalWords: words.length });
+        }
+    }, [transcript, interimTranscript, isListening]);
 
     // TTS Voice Synthesizer
     const speakText = useCallback((text, onFinish = null) => {
@@ -133,119 +154,13 @@ export default function ConversationEngine() {
         }
     };
 
-    // Initialize Web Speech Recognition
-    const startListening = useCallback(() => {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-            alert('Your browser does not support Speech Recognition. Please use Google Chrome or Microsoft Edge.');
-            return;
-        }
-
-        stopSpeakingAI();
-
-        if (recognitionRef.current) {
-            try { recognitionRef.current.abort ? recognitionRef.current.abort() : recognitionRef.current.stop(); } catch (e) {}
-        }
-
-        const recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = 'en-US';
-        recognition.maxAlternatives = 1;
-
-        recognition.onstart = () => {
-            if (isMountedRef.current) {
-                setIsListening(true);
-                speechStartTimeRef.current = Date.now();
-            }
-        };
-
-        recognition.onresult = (event) => {
-            if (!isMountedRef.current) return;
-
-            let finalStr = '';
-            let interimStr = '';
-
-            for (let i = 0; i < event.results.length; i++) {
-                const res = event.results[i];
-                const text = res[0].transcript;
-                if (res.isFinal) {
-                    finalStr += (finalStr ? ' ' : '') + text.trim();
-                } else {
-                    interimStr += (interimStr ? ' ' : '') + text.trim();
-                }
-            }
-
-            const currentSpoken = finalStr || interimStr;
-            setCurrentTranscript(finalStr);
-            setInterimText(interimStr);
-
-            // Compute Stats
-            if (currentSpoken && speechStartTimeRef.current) {
-                const elapsedMin = (Date.now() - speechStartTimeRef.current) / 60000;
-                const words = currentSpoken.split(/\s+/).filter(Boolean);
-                const wpm = elapsedMin > 0.05 ? Math.round(words.length / elapsedMin) : 0;
-
-                let fillers = 0;
-                const lower = currentSpoken.toLowerCase();
-                FILLER_WORDS.forEach(fw => {
-                    const regex = new RegExp(`\\b${fw}\\b`, 'gi');
-                    const matches = lower.match(regex);
-                    if (matches) fillers += matches.length;
-                });
-
-                setStats({ wpm, fillerCount: fillers, totalWords: words.length });
-            }
-
-            // Auto-send after 2.5s of silence if user has spoken
-            if (finalStr.trim().length > 5) {
-                if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
-                silenceTimeoutRef.current = setTimeout(() => {
-                    if (isMountedRef.current && finalStr.trim()) {
-                        handleSendMessage(finalStr.trim());
-                    }
-                }, 2500);
-            }
-        };
-
-        recognition.onerror = (event) => {
-            if (!isMountedRef.current) return;
-            if (event.error === 'no-speech') return;
-            console.warn('[STT] Recognition warning:', event.error);
-            if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-                setIsListening(false);
-            }
-        };
-
-        recognition.onend = () => {
-            if (isMountedRef.current) {
-                setIsListening(false);
-            }
-        };
-
-        recognitionRef.current = recognition;
-        try {
-            recognition.start();
-        } catch (e) {
-            console.warn('[STT] Start exception:', e);
-        }
-    }, [speakText]);
-
-    const stopListening = useCallback(() => {
-        if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
-        if (recognitionRef.current) {
-            try { recognitionRef.current.stop(); } catch (e) {}
-        }
-        if (isMountedRef.current) {
-            setIsListening(false);
-            setInterimText('');
-        }
-    }, []);
-
     // Start Session
     const handleStartSession = (scenario = selectedScenario) => {
         stopSpeakingAI();
+        stopListening();
+        resetTranscript();
         setSelectedScenario(scenario);
+
         const firstMsg = {
             role: 'assistant',
             content: scenario.initialPrompt,
@@ -253,15 +168,16 @@ export default function ConversationEngine() {
         };
         setMessages([firstMsg]);
         setHasStarted(true);
-        setCurrentTranscript('');
-        setInterimText('');
 
         if (autoSpeak) {
             speakText(scenario.initialPrompt, () => {
-                // Auto-listen after initial AI prompt finishes
-                startListening();
+                if (isMountedRef.current) {
+                    speechStartTimeRef.current = Date.now();
+                    startListening();
+                }
             });
         } else {
+            speechStartTimeRef.current = Date.now();
             startListening();
         }
     };
@@ -271,14 +187,13 @@ export default function ConversationEngine() {
         stopListening();
         setHasStarted(false);
         setMessages([]);
-        setCurrentTranscript('');
-        setInterimText('');
+        resetTranscript();
         setTextInput('');
     };
 
     // Send Turn to AI
     const handleSendMessage = async (explicitText = null) => {
-        const text = (explicitText || currentTranscript || textInput).trim();
+        const text = (explicitText || transcript || textInput).trim();
         if (!text || loadingAI) return;
 
         stopListening();
@@ -292,8 +207,7 @@ export default function ConversationEngine() {
 
         const updatedHistory = [...messages, newUserMessage];
         setMessages(updatedHistory);
-        setCurrentTranscript('');
-        setInterimText('');
+        resetTranscript();
         setTextInput('');
         setLoadingAI(true);
 
@@ -319,8 +233,8 @@ export default function ConversationEngine() {
 
                 if (autoSpeak) {
                     speakText(aiReply, () => {
-                        // Automatically restart mic after AI finishes speaking its response!
                         if (isMountedRef.current && hasStarted) {
+                            speechStartTimeRef.current = Date.now();
                             startListening();
                         }
                     });
@@ -331,7 +245,12 @@ export default function ConversationEngine() {
             if (isMountedRef.current) {
                 const fallbackReply = "That makes sense! How did you handle the challenges that came with that?";
                 setMessages(prev => [...prev, { role: 'assistant', content: fallbackReply }]);
-                if (autoSpeak) speakText(fallbackReply, () => startListening());
+                if (autoSpeak) {
+                    speakText(fallbackReply, () => {
+                        speechStartTimeRef.current = Date.now();
+                        startListening();
+                    });
+                }
             }
         } finally {
             if (isMountedRef.current) {
@@ -412,7 +331,7 @@ export default function ConversationEngine() {
                 </div>
             </div>
 
-            {/* Scenario Quick Selector (when session has not started) */}
+            {/* Scenario Selector when idle */}
             {!hasStarted ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
@@ -468,7 +387,7 @@ export default function ConversationEngine() {
                     </button>
                 </div>
             ) : (
-                /* Live Conversation Active Screen */
+                /* Live Active Conversation Screen */
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                     {/* Live Status Bar */}
                     <div style={{
@@ -493,17 +412,17 @@ export default function ConversationEngine() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             {isSpeakingAI ? (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#c084fc', fontWeight: 800, fontSize: '13px' }}>
-                                    <Volume2 size={18} className="animate-pulse" />
-                                    <span>AI Partner is Speaking... (Listen carefully)</span>
+                                    <Volume2 size={18} />
+                                    <span>AI Partner is Speaking... (Listening paused)</span>
                                 </div>
                             ) : isListening ? (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#f87171', fontWeight: 800, fontSize: '13px' }}>
-                                    <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} className="animate-ping" />
-                                    <span>Listening to your voice... (Speak now)</span>
+                                    <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ef4444', display: 'inline-block' }} />
+                                    <span>Microphone Active — Listening to you... (Speak now)</span>
                                 </div>
                             ) : (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '13px' }}>
-                                    <span>Ready for your answer</span>
+                                    <span>Microphone Paused · Click Mic or Type Answer</span>
                                 </div>
                             )}
                         </div>
@@ -652,7 +571,7 @@ export default function ConversationEngine() {
                         })}
 
                         {/* Live Transcribing Bubble */}
-                        {(currentTranscript || interimText) && (
+                        {(transcript || interimTranscript) && (
                             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                                 <div style={{
                                     padding: '10px 16px',
@@ -663,9 +582,9 @@ export default function ConversationEngine() {
                                     fontSize: '13.5px',
                                     maxWidth: '85%',
                                 }}>
-                                    <span>{currentTranscript} </span>
-                                    <span style={{ color: '#fca5a5', fontStyle: 'italic' }}>{interimText}</span>
-                                    <span className="animate-pulse"> 🎙️</span>
+                                    <span>{transcript} </span>
+                                    <span style={{ color: '#fca5a5', fontStyle: 'italic' }}>{interimTranscript}</span>
+                                    <span> 🎙️</span>
                                 </div>
                             </div>
                         )}
@@ -694,7 +613,10 @@ export default function ConversationEngine() {
                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                             {/* Big Mic Button */}
                             <button
-                                onClick={isListening ? stopListening : startListening}
+                                onClick={isListening ? stopListening : () => {
+                                    speechStartTimeRef.current = Date.now();
+                                    startListening();
+                                }}
                                 style={{
                                     width: '52px',
                                     height: '52px',
@@ -710,18 +632,17 @@ export default function ConversationEngine() {
                                     flexShrink: 0,
                                     transition: 'all 0.2s ease',
                                 }}
-                                title={isListening ? 'Stop Listening' : 'Click to Speak'}
+                                title={isListening ? 'Pause Microphone' : 'Click to Speak'}
                             >
-                                {isListening ? <MicOff size={22} /> : <Mic size={22} />}
+                                {isListening ? <Mic size={22} /> : <MicOff size={22} />}
                             </button>
 
                             {/* Manual Text / Edit Field */}
                             <input
-                                placeholder={isListening ? "Listening to your microphone..." : "Or type your response here..."}
-                                value={currentTranscript || textInput}
+                                placeholder={isListening ? "Listening continuously... (Speak or edit text)" : "Type your response here..."}
+                                value={transcript || textInput}
                                 onChange={e => {
-                                    if (currentTranscript) setCurrentTranscript(e.target.value);
-                                    else setTextInput(e.target.value);
+                                    setTextInput(e.target.value);
                                 }}
                                 onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
                                 style={{
@@ -739,16 +660,16 @@ export default function ConversationEngine() {
                             {/* Send Button */}
                             <button
                                 onClick={() => handleSendMessage()}
-                                disabled={(!currentTranscript && !textInput) || loadingAI}
+                                disabled={(!transcript && !textInput) || loadingAI}
                                 style={{
                                     padding: '14px 20px',
                                     borderRadius: '12px',
-                                    background: (!currentTranscript && !textInput) || loadingAI ? 'rgba(255,255,255,0.06)' : '#10b981',
+                                    background: (!transcript && !textInput) || loadingAI ? 'rgba(255,255,255,0.06)' : '#10b981',
                                     border: 'none',
-                                    color: (!currentTranscript && !textInput) || loadingAI ? 'var(--text-muted)' : '#000',
+                                    color: (!transcript && !textInput) || loadingAI ? 'var(--text-muted)' : '#000',
                                     fontSize: '13px',
                                     fontWeight: 800,
-                                    cursor: (!currentTranscript && !textInput) || loadingAI ? 'not-allowed' : 'pointer',
+                                    cursor: (!transcript && !textInput) || loadingAI ? 'not-allowed' : 'pointer',
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '6px',
