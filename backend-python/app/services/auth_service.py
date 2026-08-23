@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from typing import Optional
 import jwt
 from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
@@ -9,6 +10,7 @@ from app.database import get_db
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 security = HTTPBearer()
+security_optional = HTTPBearer(auto_error=False)
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
@@ -60,3 +62,27 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             user_dict["settings"] = {}
             
         return user_dict
+
+
+async def get_optional_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional)):
+    """Returns the authenticated user or None if not authenticated."""
+    if not credentials or not credentials.credentials:
+        return None
+    try:
+        token = credentials.credentials
+        payload = decode_access_token(token)
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+        pool = get_db()
+        if not pool:
+            return {"id": user_id, "_id": str(user_id)}
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow("SELECT * FROM profiles WHERE id = $1", user_id)
+            if user:
+                user_dict = dict(user)
+                user_dict["_id"] = str(user_dict["id"])
+                return user_dict
+    except Exception:
+        pass
+    return None

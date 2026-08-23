@@ -1,6 +1,5 @@
 import asyncpg
 from app.config import DATABASE_URL
-
 import ssl
 
 # Global pool reference
@@ -10,13 +9,14 @@ async def connect_db():
     global pool
     try:
         if not DATABASE_URL:
-            print("⚠️ DATABASE_URL is not set in .env. Postgres will fail to connect.")
+            print("[INFO] DATABASE_URL is not set in .env. Postgres will fail to connect.")
             return
 
         # Clean any accidental quotes
         clean_url = DATABASE_URL.strip().strip('"').strip("'")
+        host_info = clean_url.split('@')[-1] if '@' in clean_url else 'local'
 
-        print(f"🔄 Connecting to PostgreSQL at {clean_url.split('@')[-1]}...")
+        print(f"[INFO] Connecting to PostgreSQL at {host_info}...")
         
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
@@ -31,17 +31,20 @@ async def connect_db():
             statement_cache_size=0,
             ssl=ctx,
         )
-        print("✅ Connected to PostgreSQL successfully!")
+        print("[INFO] Connected to PostgreSQL successfully!")
         
     except Exception as e:
-        print(f"⚠️ PostgreSQL connection failed: {e}")
-        print("⚠️ Server will start but database operations will fail.")
+        print(f"[WARNING] PostgreSQL connection failed: {e}")
+        print("[WARNING] Server will continue running with memory fallbacks.")
         
 async def disconnect_db():
     global pool
     if pool:
-        await pool.close()
-        print("🔌 Disconnected from PostgreSQL")
+        try:
+            await pool.close()
+            print("[INFO] Disconnected from PostgreSQL")
+        except Exception:
+            pass
 
 def get_db():
     """

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from app.services.news_service import get_all_news, get_available_periods
-from app.services.ai_service import generate_roadmap_content, expand_news_article
+from app.services.ai_service import expand_news_article
+from app.services.roadmap_service import generate_complete_roadmap
 from app.services.auth_service import get_current_user
 from pydantic import BaseModel
 from typing import Optional, List
@@ -80,6 +81,7 @@ async def get_trends(period: Optional[str] = None, user=Depends(get_current_user
 @router.post("/roadmap/generate")
 async def generate_roadmap(data: RoadmapRequest, user=Depends(get_current_user)):
     """POST /api/knowledge/roadmap/generate — AI-generated learning roadmap"""
-    roadmap = await generate_roadmap_content(data.skill, data.level)
+    roadmap = await generate_complete_roadmap(data.skill, data.level or "Beginner")
     return roadmap
+
 

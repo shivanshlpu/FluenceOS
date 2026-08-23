@@ -99,7 +99,8 @@ async def get_available_periods() -> Dict[str, Any]:
                 _set_mem_cache(cache_key, data)
                 return data
     except Exception as e:
-        print(f"⚠️ Failed to fetch DataCube periods: {e}")
+        print(f"[WARNING] News service error: {e}")
+
 
     # Fallback default structure
     today_str = datetime.utcnow().strftime("%Y-%m-%d")
@@ -194,7 +195,7 @@ async def fetch_datacube_news(category_type: str = "tech", period_id: Optional[s
                     return formatted
 
     except Exception as e:
-        print(f"⚠️ DataCube API fetch failed for {url}: {e}")
+        print(f"[WARNING] DataCube API fetch failed for {url}: {e}")
 
     return []
 
@@ -234,8 +235,9 @@ async def fetch_rss_feed(url: str, category: str) -> list:
                 })
             return articles
     except Exception as e:
-        print(f"⚠️ RSS Feed failed {url}: {e}")
+        print(f"[WARNING] RSS Feed failed {url}: {e}")
         return []
+
 
 
 
