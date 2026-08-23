@@ -60,9 +60,9 @@ export default function Navbar() {
             // 3. Clear session storage
             sessionStorage.clear();
             
-            // 4. Force reload bypassing browser cache with fresh timestamp
+            // 4. Clean reload without breaking SPA routes
             setTimeout(() => {
-                window.location.href = window.location.origin + window.location.pathname + '?refresh=' + Date.now();
+                window.location.reload();
             }, 300);
         } catch (err) {
             console.warn('Cache clearing error:', err);
