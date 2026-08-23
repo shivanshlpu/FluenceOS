@@ -32,11 +32,11 @@ if GEMINI_API_KEY:
 
 
 async def generate_ai_response(prompt: str, system: str = "") -> str:
-    """Primary AI call using Groq (compound-mini / gpt-oss), falls back to Gemini 2.5 Flash"""
+    """Primary AI call using Groq (gpt-oss-120b / qwen3.6-27b / compound-mini), falls back to Gemini 2.5 Flash"""
 
     # 1. PRIMARY: Groq Async REST API with verified models
     if GROQ_API_KEY:
-        groq_models = ["groq/compound-mini", "openai/gpt-oss-120b", "qwen/qwen3.6-27b"]
+        groq_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "groq/compound-mini"]
         for model_name in groq_models:
             try:
                 headers = {
@@ -64,7 +64,7 @@ async def generate_ai_response(prompt: str, system: str = "") -> str:
 
     # 2. FALLBACK: Gemini 2.5 Flash / Flash Latest
     if GEMINI_API_KEY:
-        gemini_candidates = ['gemini-2.5-flash', 'gemini-flash-latest']
+        gemini_candidates = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.7-flash']
         for g_model_name in gemini_candidates:
             try:
                 import google.generativeai as genai
@@ -156,29 +156,159 @@ async def generate_topic_explanation(topic: str) -> str:
     return await generate_ai_response(prompt)
 
 
+# Rich procedural CSE passage repository for instantaneous, zero-latency high-quality passages
+CSE_PASSAGES = {
+    "system design & distributed systems": {
+        "paragraph": "In distributed system architecture, scalability and high availability are core engineering objectives. When systems scale to millions of concurrent users, monolithic applications often transition into microservices communicating over asynchronous message queues and gRPC. Engineers implement load balancers, caching tiers with Redis, and database replication to eliminate single points of failure. Adhering to the CAP theorem requires deliberate trade-offs between consistency and partition tolerance. Mastering distributed tracing and idempotency ensures resilient fault recovery and low-latency throughput across cloud infrastructure.",
+        "wordCount": 77,
+        "vocabulary": [
+            {"word": "scalability", "definition": "the capability of a system to handle a growing amount of work or traffic smoothly"},
+            {"word": "monolithic", "definition": "a single-tiered software application in which user interface and data access are combined in one program"},
+            {"word": "asynchronous", "definition": "operations executed independently without blocking the main execution thread"},
+            {"word": "idempotency", "definition": "a property where an operation produces the same result even if applied multiple times"},
+            {"word": "throughput", "definition": "the rate at which a system processes requests or transfers data over a given time"}
+        ],
+        "pronunciationTip": "Pronounce 'asynchronous' as [ey-sing-kruh-nuhs] with stress on the second syllable, and 'idempotency' as [eye-dem-poh-tuhn-see]."
+    },
+    "data structures & algorithms": {
+        "paragraph": "Algorithm optimization relies heavily on choosing optimal data structures to reduce time and space complexity. When evaluating computational efficiency, software engineers utilize Big-O notation to assess worst-case performance. Hash tables provide constant time complexity on average, whereas balanced binary search trees guarantee logarithmic lookup times. In complex graph problems, Dijkstra's algorithm and dynamic programming solve intricate optimization challenges by memoizing overlapping subproblems. Developing algorithmic intuition is critical for engineering robust, high-performance software systems.",
+        "wordCount": 74,
+        "vocabulary": [
+            {"word": "complexity", "definition": "the amount of computational resources (time or memory) required to execute an algorithm"},
+            {"word": "logarithmic", "definition": "an efficiency rate where execution time grows proportionally to the logarithm of the input size"},
+            {"word": "memoization", "definition": "an optimization technique that caches the results of expensive function calls for future reuse"},
+            {"word": "overlapping", "definition": "subproblems that are solved multiple times within a recursive algorithm"},
+            {"word": "intuition", "definition": "the ability to understand or predict algorithmic behavior quickly and insightfully"}
+        ],
+        "pronunciationTip": "In 'logarithmic', pronounce it [log-uh-rith-mik] and keep the 'th' sound soft as in 'think'."
+    },
+    "operating systems & concurrency": {
+        "paragraph": "Modern operating systems govern hardware resources through preemptive scheduling, virtual memory management, and process isolation. Concurrency introduces parallel threads of execution that share memory address spaces, requiring careful synchronization primitives like mutexes and semaphores to prevent race conditions. When multiple threads compete for exclusive locks without proper acquisition order, deadlocks can freeze system workflows. Efficient context switching and interrupt handling ensure maximum CPU utilization and low system latency.",
+        "wordCount": 68,
+        "vocabulary": [
+            {"word": "preemptive", "definition": "a scheduling strategy where the OS can interrupt running tasks to allocate CPU to higher-priority tasks"},
+            {"word": "concurrency", "definition": "the ability of different parts of a program to execute out-of-order or in partial order without affecting outcome"},
+            {"word": "synchronization", "definition": "coordinating concurrent threads to ensure consistent shared memory access"},
+            {"word": "semaphore", "definition": "a synchronization variable used to control access to a common resource by multiple processes"},
+            {"word": "deadlock", "definition": "a state where a set of processes are blocked because each process is holding a resource and waiting for another"}
+        ],
+        "pronunciationTip": "For 'semaphore', pronounce it [sem-uh-fawr]. In 'synchronization', emphasize the [kruh-nahy-zay-shun] cadence."
+    },
+    "database management systems & sql": {
+        "paragraph": "Relational database management systems uphold ACID properties to guarantee transactional reliability and data integrity. Indexing strategies utilizing B-plus trees dramatically accelerate query execution by minimizing expensive disk input-output operations. When scaling relational databases, database administrators apply vertical partitioning, horizontal sharding, and read replicas. Understanding query execution plans and foreign key constraints helps software engineers write optimized SQL queries that avoid full table scans under heavy production workloads.",
+        "wordCount": 69,
+        "vocabulary": [
+            {"word": "transactional", "definition": "relating to database units of work that must succeed or fail as a complete, indivisible operation"},
+            {"word": "integrity", "definition": "the overall accuracy, completeness, and consistency of data stored in a database"},
+            {"word": "sharding", "definition": "partitioning a database horizontally across multiple server instances to distribute load"},
+            {"word": "replicas", "definition": "exact database duplicates that handle read-heavy traffic and improve fault tolerance"},
+            {"word": "execution", "definition": "the step-by-step process followed by the database engine to run a query"}
+        ],
+        "pronunciationTip": "Pronounce 'relational' as [ri-ley-shuh-nl] and 'sharding' with a clear, open 'ar' sound."
+    },
+    "artificial intelligence & machine learning": {
+        "paragraph": "Artificial intelligence has evolved rapidly with deep neural networks, transformer architectures, and attention mechanisms. Machine learning pipelines involve feature extraction, data normalization, gradient descent optimization, and loss minimization. In natural language processing, self-attention layers compute contextual relationships between tokens across vast semantic dimensions. As engineers fine-tune pretrained foundation models, evaluating perplexity, inference latency, and hallucination rates ensures responsible and accurate AI deployment.",
+        "wordCount": 66,
+        "vocabulary": [
+            {"word": "transformer", "definition": "a deep learning architecture that relies on self-attention mechanisms to process sequential data in parallel"},
+            {"word": "normalization", "definition": "scaling input features to a standard range so gradient descent converges efficiently"},
+            {"word": "gradient", "definition": "a vector of partial derivatives indicating the direction of steepest increase in a loss function"},
+            {"word": "semantic", "definition": "relating to the underlying meaning and logical relationships of words and data representations"},
+            {"word": "inference", "definition": "the phase where a trained machine learning model generates predictions from new incoming data"}
+        ],
+        "pronunciationTip": "In 'gradient', say [grey-dee-uhnt]. For 'semantic', pronounce the middle syllable cleanly [si-man-tik]."
+    },
+    "computer networks & security": {
+        "paragraph": "Computer networking architectures rely on the layered TCP/IP and OSI models to facilitate reliable packet transmission across global networks. During a TCP three-way handshake, client and server establish sequence numbers to ensure reliable data streams over unreliable network paths. Modern web applications utilize Transport Layer Security with asymmetric public-key cryptography to encrypt communications. Incorporating zero-trust network policies, DNS caching, and CDN edge caching protects sensitive digital infrastructure against distributed denial-of-service attacks.",
+        "wordCount": 73,
+        "vocabulary": [
+            {"word": "transmission", "definition": "the act of sending electromagnetic signals or packets across communication channels"},
+            {"word": "handshake", "definition": "an automated negotiation protocol between two devices establishing communication rules and parameters"},
+            {"word": "asymmetric", "definition": "cryptographic systems that use pairs of keys: a public key for encryption and a private key for decryption"},
+            {"word": "cryptography", "definition": "the practice of securing communication in the presence of adversarial third parties"},
+            {"word": "infrastructure", "definition": "the foundational hardware, software, and network resources supporting an IT environment"}
+        ],
+        "pronunciationTip": "Pronounce 'asymmetric' as [ey-si-met-rik] and 'cryptography' with emphasis on the second syllable [krip-tog-ruh-fee]."
+    },
+    "cloud computing & devops": {
+        "paragraph": "Cloud native software engineering utilizes containerization with Docker and container orchestration with Kubernetes to automate deployment and scaling. Continuous integration and continuous deployment pipelines validate code quality with automated unit testing, static linting, and artifact building. By declaring cloud infrastructure as code using Terraform, DevOps teams eliminate configuration drift and achieve reproducible multi-region deployments. Observability through structured logging and Prometheus metrics guarantees proactive alerting before service degradation affects end users.",
+        "wordCount": 71,
+        "vocabulary": [
+            {"word": "orchestration", "definition": "the automated configuration, coordination, and management of computer systems and software services"},
+            {"word": "reproducible", "definition": "capable of being recreated or duplicated reliably with identical results every time"},
+            {"word": "observability", "definition": "the degree to which the internal state of a system can be inferred from its external outputs like logs and metrics"},
+            {"word": "containerization", "definition": "packaging an application and all its dependencies into a self-contained executable container image"},
+            {"word": "degradation", "definition": "a decline in system performance, throughput, or responsiveness below standard operational thresholds"}
+        ],
+        "pronunciationTip": "Pronounce 'orchestration' as [awr-kuh-strey-shun] and 'observability' as [uhb-zur-vuh-bil-i-tee]."
+    },
+    "tech interview & engineering communication": {
+        "paragraph": "Effective technical communication is an indispensable skill for software engineers during technical interviews and architectural reviews. When presenting system design solutions, strong candidates articulate technical trade-offs, state assumptions explicitly, and justify database selections based on read-to-write ratios. Practicing concise verbal summaries helps engineers explain complex algorithms, discuss past engineering failures constructively, and build alignment with engineering leaders. Clear enunciation and structured communication turn complex engineering insights into persuasive, high-impact presentations.",
+        "wordCount": 71,
+        "vocabulary": [
+            {"word": "indispensable", "definition": "absolutely necessary, essential, or impossible to do without"},
+            {"word": "articulate", "definition": "to express an idea, thought, or technical concept clearly and coherently in words"},
+            {"word": "assumptions", "definition": "premises or requirements accepted as true without immediate proof to scope a problem"},
+            {"word": "alignment", "definition": "shared agreement, coordination, and understanding among team members and stakeholders"},
+            {"word": "persuasive", "definition": "good at convincing someone to believe or agree with a specific point of view or recommendation"}
+        ],
+        "pronunciationTip": "Pronounce 'indispensable' as [in-di-spen-suh-buhl] with clean syllable separation, and 'articulate' as [ahr-tik-yuh-leyt]."
+    }
+}
+
+
+def _get_procedural_cse_fallback(topic: str, level: str = "beginner") -> dict:
+    """Find the best matched CSE passage or create an authentic technical passage."""
+    t_low = topic.lower().strip()
+    
+    for key, data in CSE_PASSAGES.items():
+        if key in t_low or any(w in t_low for w in key.split() if len(w) > 3):
+            return data
+
+    # Default technical CSE fallback for custom topics
+    clean_topic = topic.strip().title()
+    return {
+        "paragraph": f"In computer science and software engineering, mastering {clean_topic} requires a deep understanding of core architectural principles, algorithms, and practical trade-offs. When implementing {clean_topic} in production environments, software developers must analyze scalability, latency, memory utilization, and failure scenarios. Developing clear technical articulation when discussing {clean_topic} allows engineers to communicate architectural decisions effectively to both engineering teammates and executive stakeholders. Focus on steady pacing, pronounce technical terms distinctly, and emphasize key concepts with confidence.",
+        "wordCount": 77,
+        "vocabulary": [
+            {"word": "architectural", "definition": "relating to the high-level structure and design of software systems"},
+            {"word": "scalability", "definition": "the ability of a computer application or system to adapt to increased workload"},
+            {"word": "latency", "definition": "the time delay between an action and its resulting response in a network or system"},
+            {"word": "articulation", "definition": "the clear and precise verbal expression of ideas and technical concepts"},
+            {"word": "stakeholders", "definition": "people with an interest or concern in the outcome and performance of a project"}
+        ],
+        "pronunciationTip": f"When discussing '{clean_topic}', pause naturally at transition phrases and emphasize key technical nouns clearly."
+    }
+
+
 async def generate_reading_paragraph(topic: str, level: str = "beginner") -> dict:
-    """Generate an informative, engaging reading passage for any chosen topic."""
+    """Generate an informative, engaging reading passage for any chosen CSE/tech topic."""
     prompt = f"""
-    Write a high-quality educational reading practice passage about "{topic}" for an English learner at {level} level.
+    You are an expert English Speaking & Technical Communication Coach for Computer Science & Software Engineers.
+    Write a high-quality educational reading practice passage about "{topic}" for a tech professional/student at {level} level.
 
     REQUIREMENTS:
-    - Write 120-160 words total specifically about "{topic}".
-    - Include real facts, definitions, or practical insights about "{topic}".
-    - Simple, clear sentence structure suitable for {level} level.
-    - Provide 5 key vocabulary words with simple definitions.
-    - Provide 1 actionable pronunciation tip for a word in this passage.
+    - Topic: "{topic}" (Computer Science, Engineering, Software Architecture, or Tech).
+    - Length: 80 to 120 words of authentic, high-value technical content.
+    - Style: Professional, clear, engaging, educational, and realistic.
+    - Include 5 advanced technical/professional vocabulary words with concise definitions.
+    - Include 1 practical pronunciation tip for a challenging technical word in this passage.
 
-    Return ONLY a valid JSON object:
+    Return ONLY a valid JSON object with this exact structure:
     {{
-      "paragraph": "Full reading passage about {topic}...",
-      "wordCount": 140,
+      "paragraph": "Full passage text here...",
+      "wordCount": 95,
       "vocabulary": [
-        {{"word": "key_term", "definition": "simple definition"}}
+        {{"word": "scalability", "definition": "ability to handle growing workloads smoothly"}},
+        {{"word": "asynchronous", "definition": "independent execution without blocking"}},
+        {{"word": "throughput", "definition": "rate of processing data or requests"}},
+        {{"word": "idempotency", "definition": "same result when executed multiple times"}},
+        {{"word": "latency", "definition": "delay before data transfer begins"}}
       ],
-      "pronunciationTip": "Pronunciation tip for a tricky word..."
+      "pronunciationTip": "Pronounce 'asynchronous' as [ey-sing-kruh-nuhs] with stress on the second syllable."
     }}
     """
-    system = "You are an English reading coach. Write real, engaging, topic-specific educational passages. Return only valid JSON."
+    system = "You are a professional computer science educator and technical speech coach. Return ONLY valid JSON."
     result = await generate_ai_response(prompt, system)
 
     try:
@@ -187,89 +317,186 @@ async def generate_reading_paragraph(topic: str, level: str = "beginner") -> dic
             clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
             clean = clean.rsplit("```", 1)[0]
         data = json.loads(clean)
-        if data.get("paragraph"):
+        if data.get("paragraph") and len(data["paragraph"].split()) >= 40:
             return data
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[SPEAKING] generate_reading_paragraph AI parsing error: {e}")
 
-    # Dynamic procedural fallback specifically customized for the requested topic
-    clean_topic = topic.strip().title()
+    # Rich CSE fallback
+    return _get_procedural_cse_fallback(topic, level)
+
+
+def _algorithmic_word_diff(original: str, spoken: str) -> dict:
+    """
+    Algorithmic comparison between original text and spoken text.
+    Identifies exact correct words, missed words, mispronounced/similar words, and filler words.
+    """
+    import re
+    def clean_words(text):
+        return [w.lower() for w in re.findall(r"[a-zA-Z0-9']+", text)]
+
+    orig_words_raw = re.findall(r"[a-zA-Z0-9']+", original)
+    orig_words = [w.lower() for w in orig_words_raw]
+    spoken_words = clean_words(spoken)
+
+    if not spoken_words:
+        return {
+            "accuracyScore": 0.0,
+            "fluencyScore": 0.0,
+            "overallScore": 0.0,
+            "wordsCorrect": 0,
+            "wordsTotal": len(orig_words),
+            "missedWords": orig_words_raw[:10],
+            "mispronounced": [],
+            "extraWords": [],
+            "wordsAnalysis": [{"word": w, "status": "missed"} for w in orig_words_raw]
+        }
+
+    # Levenshtein distance helper
+    def lev_dist(s1, s2):
+        if len(s1) < len(s2):
+            return lev_dist(s2, s1)
+        if len(s2) == 0:
+            return len(s1)
+        prev = range(len(s2) + 1)
+        for i, c1 in enumerate(s1):
+            curr = [i + 1]
+            for j, c2 in enumerate(s2):
+                insertions = prev[j + 1] + 1
+                deletions = curr[j] + 1
+                substitutions = prev[j] + (c1 != c2)
+                curr.append(min(insertions, deletions, substitutions))
+            prev = curr
+        return prev[-1]
+
+    # Two-pointer matching window
+    spoken_idx = 0
+    correct_count = 0
+    missed = []
+    mispronounced = []
+    analysis = []
+
+    for i, orig_w in enumerate(orig_words):
+        matched = False
+        raw_word = orig_words_raw[i]
+        
+        # Look ahead up to 6 spoken words
+        for search_offset in range(min(7, len(spoken_words) - spoken_idx)):
+            cand_spoken = spoken_words[spoken_idx + search_offset]
+            
+            if cand_spoken == orig_w:
+                matched = True
+                correct_count += 1
+                spoken_idx = spoken_idx + search_offset + 1
+                analysis.append({"word": raw_word, "status": "correct", "spoken": cand_spoken})
+                break
+            elif lev_dist(orig_w, cand_spoken) <= max(1, len(orig_w) // 4):
+                # Close match / slight mispronunciation
+                matched = True
+                correct_count += 0.8
+                spoken_idx = spoken_idx + search_offset + 1
+                mispronounced.append(raw_word)
+                analysis.append({"word": raw_word, "status": "mispronounced", "spoken": cand_spoken})
+                break
+
+        if not matched:
+            missed.append(raw_word)
+            analysis.append({"word": raw_word, "status": "missed", "spoken": ""})
+
+    # Extra filler words spoken
+    extra = []
+    filler_set = {"um", "uh", "like", "you know", "ah", "er", "hmm"}
+    for sw in spoken_words:
+        if sw in filler_set:
+            extra.append(sw)
+
+    total_words = len(orig_words)
+    raw_acc = (correct_count / max(total_words, 1)) * 10.0
+    accuracy_score = round(min(10.0, max(0.0, raw_acc)), 1)
+    fluency_score = round(min(10.0, max(1.0, 10.0 - (len(extra) * 0.5) - (len(missed) / max(total_words, 1) * 3))), 1)
+    overall_score = round((accuracy_score * 0.7) + (fluency_score * 0.3), 1)
+
     return {
-        "paragraph": f"{clean_topic} is an exciting and important subject to explore in modern life. Understanding the fundamentals of {clean_topic} helps us gain valuable knowledge and develop critical thinking skills. When we study {clean_topic}, we discover how innovation, consistency, and practical experience create meaningful progress. Whether you are learning for your career, education, or personal growth, mastering key concepts in {clean_topic} will give you confidence to communicate effectively. Take your time to read each sentence clearly, focus on proper pronunciation, and express each idea with steady rhythm and clarity.",
-        "wordCount": 92,
-        "vocabulary": [
-            {"word": "fundamentals", "definition": "the basic principles or core rules of a subject"},
-            {"word": "innovation", "definition": "introducing new ideas, methods, or creative solutions"},
-            {"word": "consistency", "definition": "doing something regularly and reliably over time"},
-            {"word": "progress", "definition": "forward movement toward achieving a goal or improvement"},
-            {"word": "effectively", "definition": "in a way that produces desired, successful results"}
-        ],
-        "pronunciationTip": f"When reading about '{clean_topic}', emphasize content words like nouns and verbs while keeping short function words smooth and relaxed."
+        "accuracyScore": accuracy_score,
+        "fluencyScore": fluency_score,
+        "overallScore": overall_score,
+        "wordsCorrect": int(round(correct_count)),
+        "wordsTotal": total_words,
+        "missedWords": missed[:15],
+        "mispronounced": list(set(mispronounced))[:10],
+        "extraWords": list(set(extra))[:5],
+        "wordsAnalysis": analysis
     }
 
 
 async def evaluate_reading(original_paragraph: str, spoken_text: str, topic: str) -> dict:
     """Compare user's spoken reading with original paragraph, score accuracy word by word."""
-    prompt = f"""
-    A student was asked to READ this paragraph aloud:
+    # Compute deterministic algorithmic word diff baseline
+    diff_baseline = _algorithmic_word_diff(original_paragraph, spoken_text)
 
-    ORIGINAL PARAGRAPH:
+    prompt = f"""
+    A Computer Science student was asked to READ this technical passage aloud:
+
+    ORIGINAL PASSAGE:
     {original_paragraph}
 
-    WHAT THE STUDENT ACTUALLY SAID (via speech recognition):
+    WHAT THE STUDENT SPOKEN TRANSCRIPT (Speech-to-Text):
     {spoken_text}
 
-    Evaluate their reading performance:
-    1. Compare word by word — how accurately did they read?
-    2. Find words they skipped, mispronounced, or added extra words
-    3. Assess their reading fluency and clarity
+    TASK:
+    1. Compare their spoken reading against the original technical passage.
+    2. Identify specific technical words they mispronounced, skipped, or read smoothly.
+    3. Provide constructive spoken English feedback, highlighting strengths and specific pronunciation improvements.
 
-    Return ONLY valid JSON:
+    Return ONLY a valid JSON object:
     {{
-      "accuracyScore": 8.5,
-      "fluencyScore": 7,
-      "overallScore": 7.8,
-      "wordsCorrect": 105,
-      "wordsTotal": 130,
-      "missedWords": ["fossil", "renewable"],
-      "mispronounced": ["atmosphere", "devastating"],
-      "extraWords": ["um", "like"],
-      "detailedFeedback": "You read the paragraph well. You skipped 2 words and added filler words. Focus on pronouncing longer words slowly.",
-      "strengths": ["Good pace", "Clear pronunciation of short words"],
-      "improvements": ["Practice longer words separately", "Avoid filler words like um"],
-      "grammarMistakes": [],
-      "vocabularySuggestions": []
+      "accuracyScore": {diff_baseline["accuracyScore"]},
+      "fluencyScore": {diff_baseline["fluencyScore"]},
+      "overallScore": {diff_baseline["overallScore"]},
+      "wordsCorrect": {diff_baseline["wordsCorrect"]},
+      "wordsTotal": {diff_baseline["wordsTotal"]},
+      "missedWords": {json.dumps(diff_baseline["missedWords"])},
+      "mispronounced": {json.dumps(diff_baseline["mispronounced"])},
+      "extraWords": {json.dumps(diff_baseline["extraWords"])},
+      "detailedFeedback": "Insightful 2-3 sentence feedback on pace, technical pronunciation, and enunciation...",
+      "strengths": ["Clear pacing on technical terms", "Smooth transition between sentences"],
+      "improvements": ["Slow down on multi-syllable terms like 'asynchronous'", "Avoid rushing comma pauses"],
+      "pronunciationGuides": [
+        {{"word": "asynchronous", "phonetic": "ey-sing-kruh-nuhs", "tip": "Stress the second syllable 'sing'"}}
+      ]
     }}
-
-    Scoring: accuracyScore = % of words read correctly / 10, fluencyScore = smoothness and pace / 10
     """
-    system = "You are an English reading coach. Be encouraging but honest. Return only valid JSON."
+    system = "You are an expert English speech and technical communication coach. Return only valid JSON."
     result = await generate_ai_response(prompt, system)
+
     try:
+        import re
         clean = result.strip()
         if clean.startswith("```"):
             clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
             clean = clean.rsplit("```", 1)[0]
-        return json.loads(clean)
-    except Exception:
-        words_orig = len(original_paragraph.split())
-        words_spoken = len(spoken_text.split())
-        accuracy = min(10, round((words_spoken / max(words_orig, 1)) * 10, 1))
-        return {
-            "accuracyScore": accuracy,
-            "fluencyScore": 6.0,
-            "overallScore": round((accuracy + 6) / 2, 1),
-            "wordsCorrect": words_spoken,
-            "wordsTotal": words_orig,
-            "missedWords": [],
-            "mispronounced": [],
-            "extraWords": [],
-            "detailedFeedback": f"You spoke {words_spoken} out of {words_orig} words. Keep practicing to improve your reading accuracy.",
-            "strengths": ["You attempted the reading exercise", "Good effort"],
-            "improvements": ["Practice reading the paragraph multiple times", "Slow down for difficult words"],
-            "grammarMistakes": [],
-            "vocabularySuggestions": []
-        }
+        
+        json_match = re.search(r'\{[\s\S]*\}', clean)
+        raw_json = json_match.group(0) if json_match else clean
+        parsed = json.loads(raw_json)
+        # Ensure algorithmic metrics remain accurate
+        parsed["wordsCorrect"] = diff_baseline["wordsCorrect"]
+        parsed["wordsTotal"] = diff_baseline["wordsTotal"]
+        parsed["wordsAnalysis"] = diff_baseline["wordsAnalysis"]
+        if not parsed.get("missedWords"):
+            parsed["missedWords"] = diff_baseline["missedWords"]
+        if not parsed.get("mispronounced"):
+            parsed["mispronounced"] = diff_baseline["mispronounced"]
+        return parsed
+    except Exception as e:
+        print(f"[SPEAKING] evaluate_reading AI parsing notice: {e}")
+
+    # Robust fallback combining algorithmic comparison
+    diff_baseline["detailedFeedback"] = f"You read {diff_baseline['wordsCorrect']} out of {diff_baseline['wordsTotal']} words accurately ({round((diff_baseline['wordsCorrect']/max(diff_baseline['wordsTotal'],1))*100)}% accuracy). Practice articulating technical terminology with a steady pace."
+    diff_baseline["strengths"] = ["Strong reading effort on technical text", "Consistent voice projection"]
+    diff_baseline["improvements"] = ["Practice multi-syllable technical terms", "Pause naturally at periods to manage breathing"]
+    diff_baseline["pronunciationGuides"] = []
+    return diff_baseline
 
 
 async def chat_speaking_coach(messages: list, scenario: str = "Tech Job Interview", difficulty: str = "Intermediate") -> dict:
