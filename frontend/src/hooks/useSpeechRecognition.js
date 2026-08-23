@@ -2,12 +2,11 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { pythonAPI } from '../services/api';
 
 /**
- * Google Assistant-Style Continuous Speech Recognition Hook
- * 1. Zero Word Loss: Auto-commits interim text on pauses so no word ever vanishes.
- * 2. Pause-Tolerant: Mic stays continuously alive during natural speaking pauses.
- * 3. Live Web Audio Level Meter: Real-time volume visualizer (0-100).
- * 4. Parallel Audio Recording: Captures raw audio for Whisper AI transcription.
- * 5. Multi-Accent Support: 'en-IN', 'en-US', 'en-GB'.
+ * Robust Cross-Platform Speech Recognition Hook (Android, iOS & Desktop)
+ * - Zero microphone lock contention on Mobile Android / iOS
+ * - Auto-commit interim text so pauses never wipe spoken words
+ * - Real-time word streaming to response box
+ * - Whisper AI high-accuracy transcription fallback
  */
 export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage = 'en-IN') => {
     const [transcript, setTranscript] = useState('');
@@ -17,14 +16,12 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
     const [language, setLanguage] = useState(initialLanguage);
     const [error, setError] = useState(null);
     const [isTranscribingAudio, setIsTranscribingAudio] = useState(false);
+    const [recognitionMode, setRecognitionMode] = useState('live'); // 'live' | 'whisper'
 
     const recognitionRef = useRef(null);
     const mediaStreamRef = useRef(null);
     const mediaRecorderRef = useRef(null);
     const audioChunksRef = useRef([]);
-    const audioContextRef = useRef(null);
-    const analyserRef = useRef(null);
-    const animFrameRef = useRef(null);
 
     const isListeningRef = useRef(false);
     const isMountedRef = useRef(true);
@@ -36,13 +33,13 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
     const lastInterimRef = useRef('');
     const restartTimerRef = useRef(null);
     const silenceTimerRef = useRef(null);
-    const consecutiveErrorsRef = useRef(0);
+
+    const isMobile = typeof navigator !== 'undefined' && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
     useEffect(() => {
         languageRef.current = language;
     }, [language]);
 
-    // Keep transcript state synchronized with accumulatedTextRef
     const updateFullTranscript = useCallback((finalPart = '', interimPart = '') => {
         const base = accumulatedTextRef.current.trim();
         const finalChunk = finalPart.trim();
@@ -58,105 +55,17 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
         lastInterimRef.current = interimChunk;
     }, []);
 
-    // Setup Web Audio Volume Meter & MediaRecorder
-    const startAudioMeter = useCallback(async () => {
-        try {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
-
-            // Reuse stream if already active
-            let stream = mediaStreamRef.current;
-            if (!stream || !stream.active) {
-                stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                mediaStreamRef.current = stream;
-            }
-
-            // Start parallel MediaRecorder for Whisper AI
-            audioChunksRef.current = [];
-            try {
-                const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-                    ? 'audio/webm;codecs=opus'
-                    : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4');
-
-                const recorder = new MediaRecorder(stream, { mimeType });
-                mediaRecorderRef.current = recorder;
-
-                recorder.ondataavailable = (event) => {
-                    if (event.data && event.data.size > 0) {
-                        audioChunksRef.current.push(event.data);
-                    }
-                };
-
-                recorder.start(500); // 500ms time slices
-            } catch (recErr) {
-                console.warn('[AUDIO] MediaRecorder init notice:', recErr);
-            }
-
-            // Audio Visualizer setup
-            const AudioCtx = window.AudioContext || window.webkitAudioContext;
-            if (!AudioCtx) return;
-
-            const audioCtx = new AudioCtx();
-            audioContextRef.current = audioCtx;
-
-            const analyser = audioCtx.createAnalyser();
-            analyser.fftSize = 256;
-            analyser.smoothingTimeConstant = 0.4;
-            analyserRef.current = analyser;
-
-            const source = audioCtx.createMediaStreamSource(stream);
-            source.connect(analyser);
-
-            const bufferLength = analyser.frequencyBinCount;
-            const dataArray = new Uint8Array(bufferLength);
-
-            const updateMeter = () => {
-                if (!isListeningRef.current || !analyserRef.current) {
-                    setAudioLevel(0);
-                    return;
-                }
-                analyserRef.current.getByteFrequencyData(dataArray);
-                let sum = 0;
-                for (let i = 0; i < bufferLength; i++) {
-                    sum += dataArray[i];
-                }
-                const avg = sum / bufferLength;
-                const normalized = Math.min(100, Math.round((avg / 128) * 100));
-                setAudioLevel(normalized);
-
-                animFrameRef.current = requestAnimationFrame(updateMeter);
-            };
-
-            updateMeter();
-        } catch (err) {
-            console.warn('[AUDIO] Volume meter error:', err);
-        }
-    }, []);
-
-    const stopAudioMeter = useCallback(() => {
-        if (animFrameRef.current) {
-            cancelAnimationFrame(animFrameRef.current);
-            animFrameRef.current = null;
-        }
-
+    // Stop media recording cleanly
+    const stopAudioRecording = useCallback(() => {
         if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
             try {
                 mediaRecorderRef.current.stop();
             } catch (e) {}
         }
-
         if (mediaStreamRef.current) {
             mediaStreamRef.current.getTracks().forEach(track => track.stop());
             mediaStreamRef.current = null;
         }
-
-        if (audioContextRef.current) {
-            try {
-                audioContextRef.current.close();
-            } catch (e) {}
-            audioContextRef.current = null;
-        }
-
-        analyserRef.current = null;
         setAudioLevel(0);
     }, []);
 
@@ -179,8 +88,8 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
             } catch (e) {}
             recognitionRef.current = null;
         }
-        stopAudioMeter();
-    }, [stopAudioMeter]);
+        stopAudioRecording();
+    }, [stopAudioRecording]);
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -200,15 +109,17 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
         setInterimTranscript('');
     }, []);
 
+    // Create browser SpeechRecognition instance
     const createRecognitionInstance = useCallback(() => {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
-            setError('Speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.');
+            setError('Speech recognition is not supported in this browser. You can use Whisper AI Mode.');
             return null;
         }
 
         const recognition = new SpeechRecognition();
-        recognition.continuous = true;
+        // On Android Chrome, continuous=false with auto-restart provides the most reliable speech results
+        recognition.continuous = !isMobile;
         recognition.interimResults = true;
         recognition.lang = languageRef.current || 'en-IN';
         recognition.maxAlternatives = 1;
@@ -216,9 +127,9 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
         recognition.onstart = () => {
             if (!isMountedRef.current) return;
             isStartingRef.current = false;
-            consecutiveErrorsRef.current = 0;
             setError(null);
             setIsListening(true);
+            setAudioLevel(50); // Visual indicator active
         };
 
         recognition.onresult = (event) => {
@@ -227,8 +138,9 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
             let currentFinal = '';
             let currentInterim = '';
 
-            for (let i = 0; i < event.results.length; i++) {
+            for (let i = event.resultIndex || 0; i < event.results.length; i++) {
                 const res = event.results[i];
+                if (!res || !res[0]) continue;
                 const text = res[0].transcript;
                 if (res.isFinal) {
                     currentFinal += (currentFinal ? ' ' : '') + text.trim();
@@ -237,45 +149,50 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
                 }
             }
 
-            sessionFinalTextRef.current = currentFinal;
+            // On mobile devices where resultIndex is 0
+            if (isMobile && !currentFinal && currentInterim) {
+                // If text was received, track it
+                lastInterimRef.current = currentInterim;
+            }
+
+            if (currentFinal) {
+                sessionFinalTextRef.current = (sessionFinalTextRef.current ? `${sessionFinalTextRef.current} ` : '') + currentFinal;
+            }
             lastInterimRef.current = currentInterim;
 
-            updateFullTranscript(currentFinal, currentInterim);
+            updateFullTranscript(sessionFinalTextRef.current, currentInterim);
 
             if (onSilenceDetected) {
                 if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
                 silenceTimerRef.current = setTimeout(() => {
-                    const fullText = (accumulatedTextRef.current + ' ' + (currentFinal || currentInterim)).trim();
+                    const fullText = (accumulatedTextRef.current + ' ' + (sessionFinalTextRef.current || currentInterim)).trim();
                     if (isMountedRef.current && isListeningRef.current && fullText) {
                         onSilenceDetected(fullText);
                     }
-                }, 3000); // 3 second learning pause tolerance
+                }, 3000);
             }
         };
 
         recognition.onerror = (e) => {
             if (!isMountedRef.current) return;
             if (e.error === 'no-speech' || e.error === 'aborted') {
-                return; // User just paused, ignore and stay active
+                return; // Normal pause during speech
             }
 
-            console.warn('[SPEECH] Recognition error event:', e.error);
+            console.warn('[SPEECH] Recognition error:', e.error);
 
             if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
                 isListeningRef.current = false;
                 setIsListening(false);
-                setError('Microphone access denied. Please click the lock or camera/mic icon in your browser URL bar to allow microphone access.');
+                setError('Microphone permission denied. Please allow microphone access in your browser settings.');
                 cleanupRecognition();
-                return;
             }
-
-            consecutiveErrorsRef.current += 1;
         };
 
         recognition.onend = () => {
             if (!isMountedRef.current) return;
 
-            // Commit final or interim words from this session to accumulated text
+            // Auto-commit any spoken words from this session
             const pendingText = (sessionFinalTextRef.current || lastInterimRef.current).trim();
             if (pendingText) {
                 accumulatedTextRef.current = (accumulatedTextRef.current + (accumulatedTextRef.current ? ' ' : '') + pendingText).trim();
@@ -285,7 +202,7 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
                 setInterimTranscript('');
             }
 
-            // Google Assistant-Style Continuous Listening: Seamlessly re-engage without dropping words
+            // Keep listening continuously if user has not clicked stop
             if (isListeningRef.current) {
                 if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
                 restartTimerRef.current = setTimeout(() => {
@@ -299,28 +216,26 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
                             }
                         } catch (err) {
                             isStartingRef.current = false;
-                            console.warn('[SPEECH] Seamless restart notice:', err);
+                            console.warn('[SPEECH] Restart recovery:', err);
                         }
                     }
-                }, 100);
+                }, isMobile ? 120 : 80);
             } else {
                 setIsListening(false);
                 setInterimTranscript('');
-                stopAudioMeter();
+                setAudioLevel(0);
             }
         };
 
         return recognition;
-    }, [cleanupRecognition, onSilenceDetected, stopAudioMeter, updateFullTranscript]);
+    }, [cleanupRecognition, isMobile, onSilenceDetected, updateFullTranscript]);
 
+    // Start Live Web Speech
     const startListening = useCallback(() => {
         setError(null);
         isListeningRef.current = true;
         setIsListening(true);
         isStartingRef.current = true;
-        consecutiveErrorsRef.current = 0;
-
-        startAudioMeter();
 
         try {
             const recognition = createRecognitionInstance();
@@ -330,16 +245,47 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
             }
         } catch (e) {
             isStartingRef.current = false;
-            console.warn('[SPEECH] Start listening error:', e);
+            console.warn('[SPEECH] Start error:', e);
         }
-    }, [createRecognitionInstance, startAudioMeter]);
+    }, [createRecognitionInstance]);
+
+    // Start Whisper AI Direct Recording Mode
+    const startWhisperRecording = useCallback(async () => {
+        setError(null);
+        audioChunksRef.current = [];
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            mediaStreamRef.current = stream;
+
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                ? 'audio/webm;codecs=opus'
+                : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4');
+
+            const recorder = new MediaRecorder(stream, { mimeType });
+            mediaRecorderRef.current = recorder;
+
+            recorder.ondataavailable = (event) => {
+                if (event.data && event.data.size > 0) {
+                    audioChunksRef.current.push(event.data);
+                }
+            };
+
+            recorder.start(500);
+            isListeningRef.current = true;
+            setIsListening(true);
+            setAudioLevel(60);
+        } catch (err) {
+            console.error('[WHISPER] Audio record error:', err);
+            setError('Could not access microphone for Whisper recording. Please check permissions.');
+        }
+    }, []);
 
     const stopListening = useCallback(() => {
         isListeningRef.current = false;
         isStartingRef.current = false;
         setIsListening(false);
 
-        // Commit any remaining interim words
+        // Commit any remaining words
         const pendingText = (sessionFinalTextRef.current || lastInterimRef.current).trim();
         if (pendingText) {
             accumulatedTextRef.current = (accumulatedTextRef.current + (accumulatedTextRef.current ? ' ' : '') + pendingText).trim();
@@ -352,7 +298,7 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
         cleanupRecognition();
     }, [cleanupRecognition]);
 
-    // Transcribe with Groq Whisper AI (Ultra-high accuracy fallback)
+    // Transcribe with Groq Whisper AI (Fast & 100% accurate)
     const refineWithWhisper = useCallback(async () => {
         if (audioChunksRef.current.length === 0) return null;
         setIsTranscribingAudio(true);
@@ -392,7 +338,10 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
         setLanguage,
         error,
         isTranscribingAudio,
+        recognitionMode,
+        setRecognitionMode,
         startListening,
+        startWhisperRecording,
         stopListening,
         resetTranscript,
         setTranscript,

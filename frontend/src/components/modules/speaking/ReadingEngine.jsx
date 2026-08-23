@@ -8,7 +8,7 @@ import {
     BookOpen, Mic, MicOff, RotateCcw, Send, Sparkles,
     Loader, Volume2, VolumeX, Settings2, Globe, CheckCircle2,
     Code, Cpu, Database, Network, Cloud, ShieldCheck, Terminal, Layers,
-    Edit3, Wand2
+    Edit3, Wand2, Radio, Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -125,40 +125,100 @@ const LEVELS = [
     { id: 'advanced', label: '🌳 Senior Engineer', desc: 'Deep technical nuance & executive precision' },
 ];
 
-// Highlight words in paragraph that the user has read in real-time
+// Levenshtein distance for real-time word matching
+function levDist(a, b) {
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
+    const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+        let prev = i;
+        for (let j = 1; j <= b.length; j++) {
+            const val = a[i - 1] === b[j - 1] ? row[j - 1] : Math.min(row[j - 1], prev, row[j]) + 1;
+            row[j - 1] = prev;
+            prev = val;
+        }
+        row[b.length] = prev;
+    }
+    return row[b.length];
+}
+
+// Highlight words in paragraph in real-time:
+// 🟢 Green = Read accurately
+// 🔴 Red Wavy Underline = Stumbled / Mispronounced word
+// ⚪ Neutral = Not yet read
 function HighlightedParagraph({ paragraph, spokenWords }) {
-    const words = paragraph.split(/(\s+)/);
-    const spokenLower = spokenWords.map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ''));
-    let spokenIdx = 0;
+    const tokens = paragraph.split(/(\s+)/);
+    const spokenClean = spokenWords.map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ''));
+    let spokenPointer = 0;
 
     return (
-        <p style={{ lineHeight: 2.1, fontSize: '16.5px', color: 'var(--text-primary, #fff)', letterSpacing: '0.01em', margin: 0 }}>
-            {words.map((token, i) => {
-                const isSpace = /^\s+$/.test(token);
-                if (isSpace) return <span key={i}>{token}</span>;
-
+        <p style={{ lineHeight: 2.2, fontSize: '16.5px', color: 'var(--text-primary, #fff)', letterSpacing: '0.01em', margin: 0 }}>
+            {tokens.map((token, i) => {
+                if (/^\s+$/.test(token)) return <span key={i}>{token}</span>;
                 const clean = token.toLowerCase().replace(/[^a-z0-9]/g, '');
                 if (!clean) return <span key={i}>{token}</span>;
 
-                let matched = false;
-                for (let j = 0; j < 8; j++) {
-                    if (spokenIdx + j < spokenLower.length && spokenLower[spokenIdx + j] === clean) {
-                        matched = true;
-                        spokenIdx = spokenIdx + j + 1;
-                        break;
+                let status = 'pending'; // 'correct' | 'struggling' | 'pending'
+
+                if (spokenPointer < spokenClean.length) {
+                    let bestMatchIdx = -1;
+                    let bestDist = 999;
+
+                    for (let w = 0; w < Math.min(7, spokenClean.length - spokenPointer); w++) {
+                        const cand = spokenClean[spokenPointer + w];
+                        const dist = levDist(clean, cand);
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            bestMatchIdx = w;
+                        }
+                    }
+
+                    if (bestMatchIdx !== -1) {
+                        if (bestDist === 0) {
+                            // Accurate word
+                            status = 'correct';
+                            spokenPointer += bestMatchIdx + 1;
+                        } else if (bestDist <= Math.max(1, Math.floor(clean.length / 3))) {
+                            // Mispronounced or stumbled -> RED LINE
+                            status = 'struggling';
+                            spokenPointer += bestMatchIdx + 1;
+                        }
                     }
                 }
 
+                let style = {
+                    borderRadius: '4px',
+                    padding: '2px 5px',
+                    transition: 'all 0.15s ease',
+                    fontWeight: 400,
+                    color: 'var(--text-secondary, #cbd5e1)',
+                    background: 'transparent',
+                    borderBottom: 'none'
+                };
+
+                if (status === 'correct') {
+                    style = {
+                        ...style,
+                        background: 'rgba(16, 185, 129, 0.25)',
+                        color: '#34d399',
+                        fontWeight: 700,
+                        borderBottom: '2.5px solid #10b981'
+                    };
+                } else if (status === 'struggling') {
+                    style = {
+                        ...style,
+                        background: 'rgba(239, 68, 68, 0.2)',
+                        color: '#f87171',
+                        fontWeight: 700,
+                        borderBottom: '2.5px dashed #ef4444',
+                        textDecoration: 'underline wavy #ef4444 1.5px'
+                    };
+                }
+
                 return (
-                    <span key={i} style={{
-                        background: matched ? 'rgba(16, 185, 129, 0.28)' : 'transparent',
-                        color: matched ? '#34d399' : 'var(--text-primary, #e2e8f0)',
-                        borderRadius: '4px',
-                        padding: '2px 5px',
-                        fontWeight: matched ? 700 : 400,
-                        transition: 'all 0.15s ease',
-                        borderBottom: matched ? '2px solid #10b981' : 'none',
-                    }}>{token}</span>
+                    <span key={i} style={style}>
+                        {token}
+                    </span>
                 );
             })}
         </p>
@@ -166,21 +226,21 @@ function HighlightedParagraph({ paragraph, spokenWords }) {
 }
 
 // Live Sound Waves Audio Visualizer
-function SoundWaves({ active, level }) {
+function SoundWaves({ active }) {
     const bars = [12, 24, 38, 48, 30, 44, 20, 34, 46, 26, 18, 40];
     return (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px', height: '36px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px', height: '32px' }}>
             {bars.map((maxH, idx) => {
-                const calculatedH = active ? Math.max(6, Math.round((maxH * (level / 100)) + Math.random() * 8)) : 4;
+                const calculatedH = active ? Math.max(8, Math.round(maxH * 0.7 + Math.random() * 12)) : 4;
                 return (
                     <div
                         key={idx}
                         style={{
                             width: '4px',
                             height: `${calculatedH}px`,
-                            background: active ? (level > 15 ? '#10b981' : '#60a5fa') : 'rgba(255,255,255,0.2)',
+                            background: active ? '#10b981' : 'rgba(255,255,255,0.2)',
                             borderRadius: '4px',
-                            transition: 'height 0.08s ease, background 0.2s',
+                            transition: 'height 0.1s ease',
                         }}
                     />
                 );
@@ -193,6 +253,7 @@ export default function ReadingEngine() {
     const [topic, setTopic] = useState('');
     const [level, setLevel] = useState('intermediate');
     const [selectedAccent, setSelectedAccent] = useState('en-IN');
+    const [voiceEngineMode, setVoiceEngineMode] = useState('live'); // 'live' | 'whisper'
     const [paragraphData, setParagraphData] = useState(null);
     const [phase, setPhase] = useState('input'); // input | read | record | result
     const [loading, setLoading] = useState(false);
@@ -207,11 +268,11 @@ export default function ReadingEngine() {
         transcript,
         interimTranscript,
         isListening,
-        audioLevel,
         setLanguage,
         error: micError,
         isTranscribingAudio,
         startListening,
+        startWhisperRecording,
         stopListening,
         resetTranscript,
         setTranscript,
@@ -223,7 +284,7 @@ export default function ReadingEngine() {
         setLanguage(selectedAccent);
     }, [selectedAccent, setLanguage]);
 
-    // Live combined word stream (final + interim) so words highlight instantaneously
+    // Live combined word stream (final + interim)
     const spokenWords = useMemo(() => {
         const fullCombined = `${transcript} ${interimTranscript}`.trim();
         return fullCombined.split(/\s+/).filter(Boolean);
@@ -284,7 +345,12 @@ export default function ReadingEngine() {
         stopNativeAudio();
         resetTranscript();
         setStartTime(Date.now());
-        startListening();
+
+        if (voiceEngineMode === 'whisper') {
+            startWhisperRecording();
+        } else {
+            startListening();
+        }
         setPhase('record');
     };
 
@@ -292,7 +358,13 @@ export default function ReadingEngine() {
         stopListening();
         resetTranscript();
         setStartTime(Date.now());
-        setTimeout(() => startListening(), 200);
+        setTimeout(() => {
+            if (voiceEngineMode === 'whisper') {
+                startWhisperRecording();
+            } else {
+                startListening();
+            }
+        }, 200);
     };
 
     const handleManualRefineWhisper = async () => {
@@ -312,8 +384,8 @@ export default function ReadingEngine() {
 
         let activeSpokenText = `${transcript} ${interimTranscript}`.trim();
 
-        // If spoken text is sparse but audio was recorded, run Whisper AI refinement
-        if ((!activeSpokenText || activeSpokenText.split(/\s+/).length < 5) && refineWithWhisper) {
+        // If in Whisper mode or speech is short, run Whisper AI transcription
+        if (voiceEngineMode === 'whisper' || (!activeSpokenText && refineWithWhisper)) {
             try {
                 const whisperResult = await refineWithWhisper();
                 if (whisperResult) {
@@ -321,7 +393,7 @@ export default function ReadingEngine() {
                     setTranscript(whisperResult);
                 }
             } catch (e) {
-                console.warn('[WHISPER] Auto refine catch:', e);
+                console.warn('[WHISPER] Whisper refine notice:', e);
             }
         }
 
@@ -397,7 +469,7 @@ export default function ReadingEngine() {
                                             CSE Technical Reading & Pronunciation Hub
                                         </h3>
                                         <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '3px 0 0 0' }}>
-                                            Continuous Google Assistant-style speech recognition — take pauses freely, your spoken words are never lost
+                                            Read technical passages with real-time word feedback — correct words turn green, mispronounced words show red lines
                                         </p>
                                     </div>
                                 </div>
@@ -605,6 +677,49 @@ export default function ReadingEngine() {
                                 </div>
                             )}
 
+                            {/* Voice Engine Selector */}
+                            <div style={{
+                                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                background: 'var(--bg-elevated-2)', padding: '12px 16px', borderRadius: '12px',
+                                marginBottom: '16px', border: '1px solid rgba(255,255,255,0.06)', flexWrap: 'wrap', gap: '10px'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <Radio size={16} color="#10b981" />
+                                    <div>
+                                        <div style={{ fontSize: '13px', fontWeight: 800, color: '#fff' }}>Speech Recognition Mode</div>
+                                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                                            {voiceEngineMode === 'live' ? '⚡ Real-time Live Speech' : '🎙️ Groq Whisper AI Studio Mode'}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                    <button
+                                        onClick={() => setVoiceEngineMode('live')}
+                                        style={{
+                                            padding: '6px 12px', borderRadius: '8px',
+                                            background: voiceEngineMode === 'live' ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
+                                            border: `1px solid ${voiceEngineMode === 'live' ? '#10b981' : 'rgba(255,255,255,0.1)'}`,
+                                            color: voiceEngineMode === 'live' ? '#34d399' : 'var(--text-secondary)',
+                                            fontSize: '12px', fontWeight: 700, cursor: 'pointer'
+                                        }}
+                                    >
+                                        🎙️ Live Browser Speech
+                                    </button>
+                                    <button
+                                        onClick={() => setVoiceEngineMode('whisper')}
+                                        style={{
+                                            padding: '6px 12px', borderRadius: '8px',
+                                            background: voiceEngineMode === 'whisper' ? 'rgba(168, 85, 247, 0.2)' : 'transparent',
+                                            border: `1px solid ${voiceEngineMode === 'whisper' ? '#a855f7' : 'rgba(255,255,255,0.1)'}`,
+                                            color: voiceEngineMode === 'whisper' ? '#c084fc' : 'var(--text-secondary)',
+                                            fontSize: '12px', fontWeight: 700, cursor: 'pointer'
+                                        }}
+                                    >
+                                        ⚡ Whisper AI Mode
+                                    </button>
+                                </div>
+                            </div>
+
                             <div style={{ display: 'flex', gap: '10px' }}>
                                 <button
                                     onClick={handleStartRecording}
@@ -675,22 +790,22 @@ export default function ReadingEngine() {
                             <div style={{
                                 width: '70px', height: '70px', margin: '0 auto 12px',
                                 borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                background: isListening ? (audioLevel > 15 ? '#10b981' : '#ef4444') : 'var(--bg-elevated-3)',
-                                boxShadow: isListening ? `0 0 ${Math.max(15, audioLevel)}px ${audioLevel > 15 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(239, 68, 68, 0.6)'}` : 'none',
-                                transition: 'all 0.15s ease',
+                                background: isListening ? '#10b981' : 'var(--bg-elevated-3)',
+                                boxShadow: isListening ? '0 0 25px rgba(16, 185, 129, 0.6)' : 'none',
+                                transition: 'all 0.2s ease',
                             }}>
                                 {isListening ? <Mic size={32} color="#fff" /> : <MicOff size={32} color="var(--text-muted)" />}
                             </div>
 
                             {/* Sound Waves */}
-                            <SoundWaves active={isListening} level={audioLevel} />
+                            <SoundWaves active={isListening} />
 
                             <p style={{ fontWeight: 800, fontSize: '15.5px', color: isListening ? '#34d399' : 'var(--text-muted)', margin: '8px 0 2px 0' }}>
-                                {isListening ? (audioLevel > 10 ? '🟢 Voice Detected · Recording Continuously' : '🟢 Listening... (You can pause to think, mic stays active)') : '⏹️ Microphone Stopped'}
+                                {isListening ? '🟢 Microphone Listening · Speak At Your Own Pace' : '⏹️ Microphone Stopped'}
                             </p>
 
                             <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', margin: 0 }}>
-                                Read at your own pace · Pauses are saved automatically · Accent: <strong style={{ color: '#60a5fa' }}>{selectedAccent}</strong>
+                                Pausing is 100% fine — your words are preserved continuously · Accent: <strong style={{ color: '#60a5fa' }}>{selectedAccent}</strong>
                             </p>
 
                             {micError && (
@@ -703,9 +818,14 @@ export default function ReadingEngine() {
                         {/* Paragraph with Live Word Highlighting */}
                         <div style={cardStyle}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
-                                <span style={{ fontSize: '11px', fontWeight: 800, color: '#34d399', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                                    ✓ Green highlights words recognized in real-time
-                                </span>
+                                <div style={{ display: 'flex', gap: '12px', fontSize: '11px', fontWeight: 800 }}>
+                                    <span style={{ color: '#34d399', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} /> Green = Good
+                                    </span>
+                                    <span style={{ color: '#f87171', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} /> Red Line = Stumbled
+                                    </span>
+                                </div>
                                 <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                                     {spokenWords.length} words captured
                                 </span>
@@ -718,7 +838,7 @@ export default function ReadingEngine() {
                                 <HighlightedParagraph paragraph={paragraphData.paragraph} spokenWords={spokenWords} />
                             </div>
 
-                            {/* Live Spoken Response Box (Editable & Auto-Preserved) */}
+                            {/* Live Spoken Response Box (Auto-Saved on Pauses) */}
                             <div style={{ marginBottom: '16px' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                                     <label style={{ fontSize: '11px', fontWeight: 800, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -747,7 +867,7 @@ export default function ReadingEngine() {
 
                                 <div style={{
                                     background: 'var(--bg-elevated-2)', borderRadius: '10px',
-                                    padding: '14px 16px', minHeight: '60px', fontSize: '14.5px',
+                                    padding: '14px 16px', minHeight: '64px', fontSize: '14.5px',
                                     border: '1px solid rgba(255, 255, 255, 0.1)',
                                     lineHeight: 1.6,
                                 }}>
@@ -776,9 +896,9 @@ export default function ReadingEngine() {
                                 </button>
                                 <button
                                     onClick={handleSubmit}
-                                    disabled={(!transcript && !interimTranscript) || loading}
+                                    disabled={(!transcript && !interimTranscript && voiceEngineMode !== 'whisper') || loading}
                                     style={{
-                                        ...btn((!transcript && !interimTranscript) || loading, 'linear-gradient(135deg, #10b981, #059669)'),
+                                        ...btn((!transcript && !interimTranscript && voiceEngineMode !== 'whisper') || loading, 'linear-gradient(135deg, #10b981, #059669)'),
                                         flex: 2,
                                         width: 'auto'
                                     }}
