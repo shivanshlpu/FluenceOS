@@ -1033,3 +1033,23 @@ async def expand_news_article(title: str, summary: str, source: str = "", catego
             "Looking ahead, this milestone is expected to drive higher developer velocity and establish new benchmarks for upcoming industry roadmaps."
         ]
     }
+
+
+async def transcribe_audio(audio_bytes: bytes, filename: str = "recording.webm") -> str:
+    """High-accuracy audio speech-to-text using Groq Whisper Large v3 Turbo"""
+    if GROQ_API_KEY:
+        try:
+            headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+            files = {"file": (filename or "recording.webm", audio_bytes, "audio/webm")}
+            data = {"model": "whisper-large-v3-turbo", "language": "en"}
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                res = await client.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files=files, data=data)
+                if res.status_code == 200:
+                    result = res.json()
+                    return result.get("text", "").strip()
+                else:
+                    print(f"[WARNING] Whisper Groq transcription HTTP {res.status_code}: {res.text}")
+        except Exception as e:
+            print(f"[WARNING] Whisper transcription failed: {e}")
+    return ""
+

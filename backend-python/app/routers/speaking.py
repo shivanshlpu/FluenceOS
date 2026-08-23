@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, UploadFile, File
 from app.models.session import SpeakingRequest
-from app.services.ai_service import evaluate_speech, generate_topic_explanation, generate_reading_paragraph, evaluate_reading, chat_speaking_coach
+from app.services.ai_service import evaluate_speech, generate_topic_explanation, generate_reading_paragraph, evaluate_reading, chat_speaking_coach, transcribe_audio
 from app.services.auth_service import get_optional_user
 from app.database import get_db
 from datetime import datetime
@@ -254,3 +254,12 @@ async def evaluate_reading_session(data: ReadingEvalRequest, user=Depends(get_op
 async def voice_chat_turn(data: VoiceChatRequest, user=Depends(get_optional_user)):
     """POST /api/speaking/chat — Real-time 2-way AI voice coach"""
     return await chat_speaking_coach(data.messages, data.scenario, data.difficulty)
+
+
+@router.post("/transcribe")
+async def transcribe_spoken_audio(file: UploadFile = File(...), user=Depends(get_optional_user)):
+    """POST /api/speaking/transcribe — Groq Whisper Large v3 Turbo audio transcription"""
+    content = await file.read()
+    transcript = await transcribe_audio(content, file.filename or "audio.webm")
+    return {"transcript": transcript}
+
