@@ -1,17 +1,65 @@
 """
-AI SERVICE — Uses Groq (primary) + Gemini (fallback)
-Chain-of-Responsibility Pattern:
-  1. Try Groq first (fastest, free)
-  2. If Groq fails/rate-limited → fallback to Gemini
+AI SERVICE — Multi-Model AI Routing & Real-time Educational Engine
+Supports:
+  - NVIDIA NIM: DeepSeek V4 Flash, Meta LLaMA 3.3 70B, Mistral Large 2, DeepSeek Coder
+  - Groq: GPT-OSS 120B, Qwen 3.6 27B, Compound Mini
+  - Google Gemini: Gemini 2.5 Flash, Gemini Flash Latest
 """
 
 import json
 import os
+import random
+import time
 import httpx
-from app.config import GROQ_API_KEY, GEMINI_API_KEY
+from typing import Optional, List, Dict, Any
+from app.config import GROQ_API_KEY, GEMINI_API_KEY, NVIDIA_API_KEY
 
 groq_client = None
 gemini_model = None
+
+# Verified Model Catalog for User Selection
+AVAILABLE_MODELS = [
+    {
+        "id": "auto",
+        "name": "Auto (Smart Failover)",
+        "provider": "Multi-Engine",
+        "description": "Smart failover across Groq, DeepSeek & Gemini for optimal speed & reliability",
+        "badge": "Recommended",
+        "icon": "Zap"
+    },
+    {
+        "id": "deepseek-ai/deepseek-v4-flash-0731",
+        "name": "DeepSeek V4 Flash",
+        "provider": "NVIDIA NIM",
+        "description": "High analytical reasoning depth, rich technical nuance & diverse phrasing",
+        "badge": "NVIDIA NIM",
+        "icon": "Cpu"
+    },
+    {
+        "id": "meta/llama-3.3-70b-instruct",
+        "name": "Meta LLaMA 3.3 70B",
+        "provider": "NVIDIA NIM",
+        "description": "Comprehensive multi-paragraph breakdowns, intuitive analogies & trade-offs",
+        "badge": "70B Quality",
+        "icon": "Layers"
+    },
+    {
+        "id": "openai/gpt-oss-120b",
+        "name": "GPT-OSS 120B",
+        "provider": "Groq",
+        "description": "Ultra-low latency inference with crisp conversational flow",
+        "badge": "Ultra Fast",
+        "icon": "Zap"
+    },
+    {
+        "id": "gemini-2.5-flash",
+        "name": "Gemini 2.5 Flash",
+        "provider": "Google AI",
+        "description": "Comprehensive creative & structured academic explanations",
+        "badge": "Google AI",
+        "icon": "Sparkles"
+    }
+]
 
 # Initialize Groq SDK (optional)
 if GROQ_API_KEY:
@@ -31,58 +79,147 @@ if GEMINI_API_KEY:
         print(f"[INFO] Gemini init: {e}")
 
 
-async def generate_ai_response(prompt: str, system: str = "") -> str:
-    """Primary AI call using Groq (gpt-oss-120b / qwen3.6-27b / compound-mini), falls back to Gemini 2.5 Flash"""
+async def _call_nvidia_nim(model_name: str, prompt: str, system: str = "", temperature: float = 0.7) -> Optional[str]:
+    """Helper to query NVIDIA NIM API"""
+    if not NVIDIA_API_KEY:
+        return None
+    try:
+        headers = {
+            "Authorization": f"Bearer {NVIDIA_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system or "You are an expert AI educator and communication coach."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": temperature,
+            "max_tokens": 2500
+        }
+        async with httpx.AsyncClient(timeout=28.0) as client:
+            res = await client.post("https://integrate.api.nvidia.com/v1/chat/completions", headers=headers, json=payload)
+            if res.status_code == 200:
+                data = res.json()
+                return data["choices"][0]["message"]["content"]
+            else:
+                print(f"[WARNING] NVIDIA NIM ({model_name}) HTTP {res.status_code}: {res.text[:150]}")
+    except Exception as e:
+        print(f"[WARNING] NVIDIA NIM ({model_name}) call failed: {e}")
+    return None
 
-    # 1. PRIMARY: Groq Async REST API with verified models
+
+async def _call_groq(model_name: str, prompt: str, system: str = "", temperature: float = 0.7) -> Optional[str]:
+    """Helper to query Groq REST API"""
+    if not GROQ_API_KEY:
+        return None
+    try:
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system or "You are an expert AI educator and communication coach."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": temperature,
+            "max_tokens": 2500
+        }
+        async with httpx.AsyncClient(timeout=22.0) as client:
+            res = await client.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
+            if res.status_code == 200:
+                data = res.json()
+                return data["choices"][0]["message"]["content"]
+            else:
+                print(f"[WARNING] Groq ({model_name}) HTTP {res.status_code}: {res.text[:150]}")
+    except Exception as e:
+        print(f"[WARNING] Groq ({model_name}) call failed: {e}")
+    return None
+
+
+async def _call_gemini(model_name: str, prompt: str, system: str = "") -> Optional[str]:
+    """Helper to query Google Gemini"""
+    if not GEMINI_API_KEY:
+        return None
+    try:
+        import google.generativeai as genai
+        m = genai.GenerativeModel(model_name)
+        full_prompt = f"{system}\n\n{prompt}" if system else prompt
+        response = m.generate_content(full_prompt)
+        if response and response.text:
+            return response.text
+    except Exception as e:
+        print(f"[WARNING] Gemini ({model_name}) call failed: {e}")
+    return None
+
+
+async def generate_ai_response(
+    prompt: str,
+    system: str = "",
+    model_preference: str = "auto",
+    temperature: float = 0.7
+) -> str:
+    """
+    Flexible Multi-Engine AI generation:
+    Directly routes to requested model (NVIDIA NIM / Groq / Gemini),
+    and gracefully falls back through the chain if a provider is rate-limited.
+    """
+    pref = (model_preference or "auto").strip().lower()
+
+    # 1. DIRECT ROUTING: User requested a specific NVIDIA model
+    if any(k in pref for k in ["deepseek", "llama", "mistral", "nvidia", "deepseek-ai/", "meta/"]):
+        target_model = model_preference if "/" in model_preference else "deepseek-ai/deepseek-v4-flash-0731"
+        out = await _call_nvidia_nim(target_model, prompt, system, temperature)
+        if out:
+            return out
+
+    # 2. DIRECT ROUTING: User requested a specific Groq model
+    elif any(k in pref for k in ["groq", "gpt-oss", "qwen", "openai/"]):
+        target_model = model_preference if "/" in model_preference else "openai/gpt-oss-120b"
+        out = await _call_groq(target_model, prompt, system, temperature)
+        if out:
+            return out
+
+    # 3. DIRECT ROUTING: User requested Gemini
+    elif "gemini" in pref:
+        target_model = model_preference if "gemini-" in model_preference else "gemini-2.5-flash"
+        out = await _call_gemini(target_model, prompt, system)
+        if out:
+            return out
+
+    # 4. DEFAULT SMART FAILOVER CHAIN (Auto / Fallback)
+    # Tier 1: Groq fast models
     if GROQ_API_KEY:
-        groq_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "groq/compound-mini"]
-        for model_name in groq_models:
-            try:
-                headers = {
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": "application/json"
-                }
-                payload = {
-                    "model": model_name,
-                    "messages": [
-                        {"role": "system", "content": system or "You are an AI assistant."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.7,
-                    "max_tokens": 2048
-                }
-                async with httpx.AsyncClient(timeout=20.0) as client:
-                    res = await client.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
-                    if res.status_code == 200:
-                        data = res.json()
-                        return data["choices"][0]["message"]["content"]
-                    else:
-                        print(f"[WARNING] Groq ({model_name}) HTTP {res.status_code}: {res.text[:150]}")
-            except Exception as groq_err:
-                print(f"[WARNING] Groq ({model_name}) failed: {groq_err}")
+        for g_m in ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "groq/compound-mini"]:
+            out = await _call_groq(g_m, prompt, system, temperature)
+            if out:
+                return out
 
-    # 2. FALLBACK: Gemini 2.5 Flash / Flash Latest
+    # Tier 2: NVIDIA NIM (DeepSeek V4 Flash, LLaMA 3.3 70B, Mistral Large 2)
+    if NVIDIA_API_KEY:
+        for n_m in ["deepseek-ai/deepseek-v4-flash-0731", "meta/llama-3.3-70b-instruct", "mistralai/mistral-large-2-instruct"]:
+            out = await _call_nvidia_nim(n_m, prompt, system, temperature)
+            if out:
+                return out
+
+    # Tier 3: Gemini Models
     if GEMINI_API_KEY:
-        gemini_candidates = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.7-flash']
-        for g_model_name in gemini_candidates:
-            try:
-                import google.generativeai as genai
-                m = genai.GenerativeModel(g_model_name)
-                full_prompt = f"{system}\n\n{prompt}" if system else prompt
-                response = m.generate_content(full_prompt)
-                if response and response.text:
-                    return response.text
-            except Exception as gemini_error:
-                print(f"[WARNING] Gemini ({g_model_name}) failed: {gemini_error}")
+        for gm_m in ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-3.7-flash']:
+            out = await _call_gemini(gm_m, prompt, system)
+            if out:
+                return out
 
-    # 3. Structured fallback if all networks fail
+    # Tier 4: Fallback
     return json.dumps({
         "message": "AI service is currently offline. Please check your API keys or internet connection."
     })
 
 
-async def evaluate_speech(transcript: str, topic: str) -> dict:
+
+
+async def evaluate_speech(transcript: str, topic: str, model: str = "auto") -> dict:
     """
     Speaking Evaluation:
     1. Grammar Analysis
@@ -120,7 +257,7 @@ async def evaluate_speech(transcript: str, topic: str) -> dict:
     """
 
     system = "You are an expert English speaking coach. Return only valid JSON, no extra text."
-    result = await generate_ai_response(prompt, system)
+    result = await generate_ai_response(prompt, system, model_preference=model)
 
     try:
         # Parse JSON from AI response
@@ -146,14 +283,153 @@ async def evaluate_speech(transcript: str, topic: str) -> dict:
         }
 
 
-async def generate_topic_explanation(topic: str) -> str:
-    """Generate simple English explanation of any topic for speaking practice"""
-    prompt = f"""
-    Explain "{topic}" in simple, clear English in 3-4 sentences.
-    Make it suitable for a 1-2 minute speaking practice session.
-    Include: what it is, why it matters, and one real-world example.
+TOPIC_ANGLES = [
+    {
+        "id": "architectural",
+        "label": "🏗️ Deep Mechanics & First Principles",
+        "focus": "Focus deeply on internal mechanisms, step-by-step logic, architectural structure, and underlying dynamics. Explain how the core components interact."
+    },
+    {
+        "id": "analogy",
+        "label": "💡 Intuitive Analogies & Mental Models",
+        "focus": "Use a fresh, vivid real-world metaphor and intuitive storytelling. Connect the concept to relatable everyday scenarios before breaking down practical mechanics."
+    },
+    {
+        "id": "tradeoffs",
+        "label": "⚖️ Strategic Trade-offs & Industry Impact",
+        "focus": "Focus on real-world impact, critical pros vs cons, scalability bottlenecks, failure modes, and why modern organizations or individuals adopt it."
+    },
+    {
+        "id": "interview",
+        "label": "🎯 Executive Pitch & Speaking Discussion",
+        "focus": "Structure the explanation as an articulate, persuasive briefing suitable for technical interviews, presentation debates, or executive overviews."
+    }
+]
+
+
+async def generate_topic_explanation(
+    topic: str,
+    model: str = "auto",
+    angle: Optional[str] = None,
+    seed: Optional[int] = None
+) -> dict:
     """
-    return await generate_ai_response(prompt)
+    Comprehensive, in-depth explanation generator for ANY topic (technical or non-technical).
+    Includes dynamic angle variations, anti-repetition phrasing, rich paragraphs, 
+    real-world case studies, speaking talking points, and power vocabulary.
+    """
+    clean_topic = topic.strip()
+    
+    # Resolve angle
+    selected_angle = None
+    if angle:
+        for a in TOPIC_ANGLES:
+            if a["id"] == angle or angle in a["id"]:
+                selected_angle = a
+                break
+    if not selected_angle:
+        selected_angle = random.choice(TOPIC_ANGLES)
+
+    # Dynamic entropy for non-repeating sentence structures & fresh analogies
+    salt = seed if seed is not None else int(time.time() * 1000) % 100000
+    entropy_seed = f"Variant-{salt}-{random.randint(100, 999)}"
+
+    prompt = f"""
+    You are a distinguished Educator, Senior Technical Architect, and Communication Coach.
+    Provide a comprehensive, authoritative, and deeply educational explanation of "{clean_topic}".
+    
+    [PEDAGOGICAL PERSPECTIVE]:
+    {selected_angle['label']} — {selected_angle['focus']}
+    
+    [ANTI-REPETITION INSTRUCTIONS (Seed: {entropy_seed})]:
+    - Craft a fresh, distinctive explanation with varied sentence rhythm and unique phrasing.
+    - Avoid clichéd openings like "In today's fast-paced world" or generic introductory templates.
+    - Tailor the depth specifically to "{clean_topic}":
+      * If technical (e.g. Kubernetes, DSA, Kafka, OAuth, Concurrency, Sharding): dive into architecture, algorithms, state management, protocols, and latency/memory trade-offs.
+      * If non-technical (e.g. Leadership, Public Speaking, Stoicism, Economics, Active Listening): dive into cognitive frameworks, behavioral dynamics, practical tactics, and interpersonal impact.
+    
+    [OUTPUT REQUIREMENTS]:
+    Return ONLY a valid JSON object with the following fields:
+    {{
+      "summary": "2-3 crisp, compelling sentences defining the core foundation and essence of the topic.",
+      "detailedExplanation": "A rich, multi-sentence deep dive (160 to 240 words) exploring core mechanisms, internal logic, nuances, and dynamics with high conceptual depth.",
+      "whyItMatters": "Clear, tangible explanation of why this concept is critical in modern industry, engineering, or professional growth.",
+      "realWorldExample": "A vivid real-world case study or practical scenario (e.g. how Netflix/Uber/Google or high-performing teams apply this in production/practice).",
+      "talkingPoints": [
+        "1st key argument or perspective to articulate during speaking practice",
+        "2nd key argument highlighting architectural/strategic trade-offs",
+        "3rd key argument addressing common misconceptions or future trends"
+      ],
+      "keyVocabulary": [
+        {{"word": "term1", "definition": "concise meaning in context", "phonetic": "[pronunciation guide]"}},
+        {{"word": "term2", "definition": "concise meaning in context", "phonetic": "[pronunciation guide]"}},
+        {{"word": "term3", "definition": "concise meaning in context", "phonetic": "[pronunciation guide]"}},
+        {{"word": "term4", "definition": "concise meaning in context", "phonetic": "[pronunciation guide]"}}
+      ],
+      "pronunciationTip": "Practical coaching tip on enunciating challenging terms with confidence and rhythm."
+    }}
+    """
+
+    system = "You are a world-class educator and communication specialist. Return only valid JSON, without any markdown fences."
+    result = await generate_ai_response(prompt, system, model_preference=model, temperature=0.85)
+
+    try:
+        clean = result.strip()
+        if clean.startswith("```"):
+            clean = clean.split("\n", 1)[1] if "\n" in clean else clean[3:]
+            clean = clean.rsplit("```", 1)[0]
+        
+        data = json.loads(clean)
+        
+        # Build composite formatted markdown explanation
+        formatted_md = f"""### 📌 Core Overview\n{data.get('summary', '')}\n\n### 🔍 Deep-Dive Analysis\n{data.get('detailedExplanation', '')}\n\n### 💡 Why It Matters\n{data.get('whyItMatters', '')}\n\n### 🏢 Real-World Case Study\n{data.get('realWorldExample', '')}"""
+        
+        return {
+            "topic": clean_topic,
+            "modelUsed": model,
+            "angle": selected_angle["id"],
+            "angleLabel": selected_angle["label"],
+            "summary": data.get("summary", ""),
+            "detailedExplanation": data.get("detailedExplanation", ""),
+            "whyItMatters": data.get("whyItMatters", ""),
+            "realWorldExample": data.get("realWorldExample", ""),
+            "talkingPoints": data.get("talkingPoints", []),
+            "keyVocabulary": data.get("keyVocabulary", []),
+            "pronunciationTip": data.get("pronunciationTip", ""),
+            "explanation": formatted_md
+        }
+    except Exception as e:
+        print(f"[SPEAKING] generate_topic_explanation parsing notice: {e}")
+
+    # High-quality structured fallback if AI parsing fails
+    fallback_summary = f"{clean_topic.title()} represents a critical discipline requiring both conceptual clarity and practical execution. Mastering this area enables professionals to dissect complex problems and articulate scalable solutions."
+    fallback_detailed = f"When analyzing {clean_topic}, practitioners examine core functional principles, systematic workflows, and operational trade-offs. In modern environments, implementing {clean_topic} effectively demands deliberate decision-making regarding efficiency, maintainability, and resource allocation. Whether discussing structural components or strategic impact, clear articulation highlights nuanced trade-offs and reinforces leadership authority."
+    fallback_why = f"Understanding {clean_topic} provides a competitive edge in technical interviews, cross-functional collaboration, and architectural decision-making."
+    fallback_example = f"Organizations utilize {clean_topic} to eliminate operational bottlenecks, ensure fault tolerance, and accelerate team velocity across distributed initiatives."
+    
+    return {
+        "topic": clean_topic,
+        "modelUsed": model,
+        "angle": selected_angle["id"],
+        "angleLabel": selected_angle["label"],
+        "summary": fallback_summary,
+        "detailedExplanation": fallback_detailed,
+        "whyItMatters": fallback_why,
+        "realWorldExample": fallback_example,
+        "talkingPoints": [
+            f"Define {clean_topic} starting with first-principles before expanding into implementation details.",
+            f"Discuss key trade-offs and operational challenges when scaling {clean_topic}.",
+            f"Highlight real-world industry benchmarks and measurable business outcomes."
+        ],
+        "keyVocabulary": [
+            {"word": "orchestration", "definition": "coordinating complex workflows and systems smoothly", "phonetic": "[awr-kuh-strey-shun]"},
+            {"word": "scalability", "definition": "the capacity to handle growing workloads effortlessly", "phonetic": "[skey-luh-bil-i-tee]"},
+            {"word": "articulation", "definition": "clear, distinct verbal expression of concepts", "phonetic": "[ahr-tik-yuh-ley-shun]"},
+            {"word": "idempotency", "definition": "producing the exact same result regardless of repetition", "phonetic": "[eye-dem-poh-tuhn-see]"}
+        ],
+        "pronunciationTip": f"Speak about '{clean_topic}' with a measured, confident pace and pause naturally at paragraph transitions.",
+        "explanation": f"### 📌 Core Overview\n{fallback_summary}\n\n### 🔍 Deep-Dive Analysis\n{fallback_detailed}\n\n### 💡 Why It Matters\n{fallback_why}\n\n### 🏢 Real-World Application\n{fallback_example}"
+    }
 
 
 # Rich procedural CSE passage repository for instantaneous, zero-latency high-quality passages
@@ -281,23 +557,30 @@ def _get_procedural_cse_fallback(topic: str, level: str = "beginner") -> dict:
     }
 
 
-async def generate_reading_paragraph(topic: str, level: str = "beginner") -> dict:
-    """Generate an informative, engaging reading passage for any chosen CSE/tech topic."""
+async def generate_reading_paragraph(
+    topic: str,
+    level: str = "beginner",
+    model: str = "auto",
+    angle: Optional[str] = None
+) -> dict:
+    """Generate an informative, engaging reading passage for any chosen topic (technical or general)."""
+    salt = int(time.time() * 1000) % 100000
     prompt = f"""
-    You are an expert English Speaking & Technical Communication Coach for Computer Science & Software Engineers.
-    Write a high-quality educational reading practice passage about "{topic}" for a tech professional/student at {level} level.
+    You are an expert English Speaking & Technical Communication Coach.
+    Write an educational, high-quality reading practice passage about "{topic}" for a professional/student at {level} level.
+    Variation Seed: {salt}
 
     REQUIREMENTS:
-    - Topic: "{topic}" (Computer Science, Engineering, Software Architecture, or Tech).
-    - Length: 80 to 120 words of authentic, high-value technical content.
-    - Style: Professional, clear, engaging, educational, and realistic.
-    - Include 5 advanced technical/professional vocabulary words with concise definitions.
-    - Include 1 practical pronunciation tip for a challenging technical word in this passage.
+    - Topic: "{topic}" (Technical or General Knowledge).
+    - Length: 90 to 140 words of substantive, high-value content with varied sentence structure.
+    - Style: Professional, informative, engaging, and articulate.
+    - Include 5 advanced vocabulary words with concise contextual definitions.
+    - Include 1 practical pronunciation tip for a challenging word in this passage.
 
     Return ONLY a valid JSON object with this exact structure:
     {{
       "paragraph": "Full passage text here...",
-      "wordCount": 95,
+      "wordCount": 110,
       "vocabulary": [
         {{"word": "scalability", "definition": "ability to handle growing workloads smoothly"}},
         {{"word": "asynchronous", "definition": "independent execution without blocking"}},
@@ -308,8 +591,8 @@ async def generate_reading_paragraph(topic: str, level: str = "beginner") -> dic
       "pronunciationTip": "Pronounce 'asynchronous' as [ey-sing-kruh-nuhs] with stress on the second syllable."
     }}
     """
-    system = "You are a professional computer science educator and technical speech coach. Return ONLY valid JSON."
-    result = await generate_ai_response(prompt, system)
+    system = "You are a professional educator and speech coach. Return ONLY valid JSON, no markdown fences."
+    result = await generate_ai_response(prompt, system, model_preference=model, temperature=0.8)
 
     try:
         clean = result.strip()
@@ -326,116 +609,54 @@ async def generate_reading_paragraph(topic: str, level: str = "beginner") -> dic
     return _get_procedural_cse_fallback(topic, level)
 
 
+from app.services.scoring_service import calculate_reading_scores, validate_audio_quality
+
+
 def _algorithmic_word_diff(original: str, spoken: str) -> dict:
-    """
-    Algorithmic comparison between original text and spoken text.
-    Identifies exact correct words, missed words, mispronounced/similar words, and filler words.
-    """
-    import re
-    def clean_words(text):
-        return [w.lower() for w in re.findall(r"[a-zA-Z0-9']+", text)]
+    """Delegates to advanced scoring service with Needleman-Wunsch sequence alignment."""
+    return calculate_reading_scores(original, spoken)
 
-    orig_words_raw = re.findall(r"[a-zA-Z0-9']+", original)
-    orig_words = [w.lower() for w in orig_words_raw]
-    spoken_words = clean_words(spoken)
 
-    if not spoken_words:
+async def evaluate_reading(
+    original_paragraph: str,
+    spoken_text: str,
+    topic: str,
+    duration: int = 0,
+    model: str = "auto",
+    audio_quality_metrics: Optional[dict] = None
+) -> dict:
+    """Compare user's spoken reading with original paragraph, score accuracy word by word with 6 separate score components."""
+    # Pre-validate audio quality
+    quality_check = validate_audio_quality(audio_quality_metrics, spoken_text, duration)
+    if not quality_check["isAcceptable"]:
         return {
-            "accuracyScore": 0.0,
-            "fluencyScore": 0.0,
+            "status": "rejected",
+            "isAcceptable": False,
+            "rejectionReason": quality_check["rejectionReason"],
+            "rejectionMessage": quality_check["message"],
             "overallScore": 0.0,
-            "wordsCorrect": 0,
-            "wordsTotal": len(orig_words),
-            "missedWords": orig_words_raw[:10],
-            "mispronounced": [],
-            "extraWords": [],
-            "wordsAnalysis": [{"word": w, "status": "missed"} for w in orig_words_raw]
+            "accuracyScore": 0.0,
+            "pronunciationScore": 0.0,
+            "fluencyScore": 0.0,
+            "paceScore": 0.0,
+            "pauseScore": 0.0,
+            "vocabularyScore": 0.0,
+            "detailedFeedback": quality_check["message"],
+            "strengths": [],
+            "improvements": ["Ensure a quiet environment and speak clearly into the microphone."],
+            "pronunciationGuides": []
         }
 
-    # Levenshtein distance helper
-    def lev_dist(s1, s2):
-        if len(s1) < len(s2):
-            return lev_dist(s2, s1)
-        if len(s2) == 0:
-            return len(s1)
-        prev = range(len(s2) + 1)
-        for i, c1 in enumerate(s1):
-            curr = [i + 1]
-            for j, c2 in enumerate(s2):
-                insertions = prev[j + 1] + 1
-                deletions = curr[j] + 1
-                substitutions = prev[j] + (c1 != c2)
-                curr.append(min(insertions, deletions, substitutions))
-            prev = curr
-        return prev[-1]
-
-    # Two-pointer matching window
-    spoken_idx = 0
-    correct_count = 0
-    missed = []
-    mispronounced = []
-    analysis = []
-
-    for i, orig_w in enumerate(orig_words):
-        matched = False
-        raw_word = orig_words_raw[i]
-        
-        # Look ahead up to 6 spoken words
-        for search_offset in range(min(7, len(spoken_words) - spoken_idx)):
-            cand_spoken = spoken_words[spoken_idx + search_offset]
-            
-            if cand_spoken == orig_w:
-                matched = True
-                correct_count += 1
-                spoken_idx = spoken_idx + search_offset + 1
-                analysis.append({"word": raw_word, "status": "correct", "spoken": cand_spoken})
-                break
-            elif lev_dist(orig_w, cand_spoken) <= max(1, len(orig_w) // 4):
-                # Close match / slight mispronunciation
-                matched = True
-                correct_count += 0.8
-                spoken_idx = spoken_idx + search_offset + 1
-                mispronounced.append(raw_word)
-                analysis.append({"word": raw_word, "status": "mispronounced", "spoken": cand_spoken})
-                break
-
-        if not matched:
-            missed.append(raw_word)
-            analysis.append({"word": raw_word, "status": "missed", "spoken": ""})
-
-    # Extra filler words spoken
-    extra = []
-    filler_set = {"um", "uh", "like", "you know", "ah", "er", "hmm"}
-    for sw in spoken_words:
-        if sw in filler_set:
-            extra.append(sw)
-
-    total_words = len(orig_words)
-    raw_acc = (correct_count / max(total_words, 1)) * 10.0
-    accuracy_score = round(min(10.0, max(0.0, raw_acc)), 1)
-    fluency_score = round(min(10.0, max(1.0, 10.0 - (len(extra) * 0.5) - (len(missed) / max(total_words, 1) * 3))), 1)
-    overall_score = round((accuracy_score * 0.7) + (fluency_score * 0.3), 1)
-
-    return {
-        "accuracyScore": accuracy_score,
-        "fluencyScore": fluency_score,
-        "overallScore": overall_score,
-        "wordsCorrect": int(round(correct_count)),
-        "wordsTotal": total_words,
-        "missedWords": missed[:15],
-        "mispronounced": list(set(mispronounced))[:10],
-        "extraWords": list(set(extra))[:5],
-        "wordsAnalysis": analysis
-    }
-
-
-async def evaluate_reading(original_paragraph: str, spoken_text: str, topic: str) -> dict:
-    """Compare user's spoken reading with original paragraph, score accuracy word by word."""
-    # Compute deterministic algorithmic word diff baseline
-    diff_baseline = _algorithmic_word_diff(original_paragraph, spoken_text)
+    # Compute deterministic algorithmic multi-component scores
+    scores = calculate_reading_scores(
+        original_paragraph,
+        spoken_text,
+        duration_seconds=duration,
+        audio_quality_metrics=audio_quality_metrics
+    )
 
     prompt = f"""
-    A Computer Science student was asked to READ this technical passage aloud:
+    A student was asked to READ this technical passage aloud:
 
     ORIGINAL PASSAGE:
     {original_paragraph}
@@ -443,33 +664,38 @@ async def evaluate_reading(original_paragraph: str, spoken_text: str, topic: str
     WHAT THE STUDENT SPOKEN TRANSCRIPT (Speech-to-Text):
     {spoken_text}
 
+    ALGORITHMIC SCORE SUMMARY:
+    - Word Accuracy Score: {scores["accuracyScore"]} / 10
+    - Pronunciation Score: {scores["pronunciationScore"]} / 10
+    - Fluency Score: {scores["fluencyScore"]} / 10
+    - Speaking Pace (WPM: {scores["wpm"]}): {scores["paceScore"]} / 10
+    - Technical Vocabulary Mastery: {scores["vocabularyScore"]} / 10
+    - Overall Score: {scores["overallScore"]} / 10
+
     TASK:
-    1. Compare their spoken reading against the original technical passage.
-    2. Identify specific technical words they mispronounced, skipped, or read smoothly.
-    3. Provide constructive spoken English feedback, highlighting strengths and specific pronunciation improvements.
+    1. Analyze their spoken reading against the original passage.
+    2. Provide constructive spoken English feedback on their technical enunciation, rhythm, and cadence.
+    3. Identify 1-3 difficult technical words from the passage and provide accurate phonetic breakdown & articulation tip.
 
     Return ONLY a valid JSON object:
     {{
-      "accuracyScore": {diff_baseline["accuracyScore"]},
-      "fluencyScore": {diff_baseline["fluencyScore"]},
-      "overallScore": {diff_baseline["overallScore"]},
-      "wordsCorrect": {diff_baseline["wordsCorrect"]},
-      "wordsTotal": {diff_baseline["wordsTotal"]},
-      "missedWords": {json.dumps(diff_baseline["missedWords"])},
-      "mispronounced": {json.dumps(diff_baseline["mispronounced"])},
-      "extraWords": {json.dumps(diff_baseline["extraWords"])},
-      "detailedFeedback": "Insightful 2-3 sentence feedback on pace, technical pronunciation, and enunciation...",
-      "strengths": ["Clear pacing on technical terms", "Smooth transition between sentences"],
-      "improvements": ["Slow down on multi-syllable terms like 'asynchronous'", "Avoid rushing comma pauses"],
+      "detailedFeedback": "Insightful 2-3 sentence feedback on pace, pronunciation, and enunciation...",
+      "strengths": ["Clear articulation of technical terms", "Smooth transition between sentences"],
+      "improvements": ["Slow down on multi-syllable terms", "Avoid rushing comma pauses"],
       "pronunciationGuides": [
         {{"word": "asynchronous", "phonetic": "ey-sing-kruh-nuhs", "tip": "Stress the second syllable 'sing'"}}
       ]
     }}
     """
-    system = "You are an expert English speech and technical communication coach. Return only valid JSON."
-    result = await generate_ai_response(prompt, system)
+    system = "You are an expert English speech and CSE technical communication coach. Return only valid JSON."
+    
+    detailed_feedback = f"You read {scores['wordsCorrect']} out of {scores['wordsTotal']} words accurately ({round((scores['wordsCorrect']/max(scores['wordsTotal'],1))*100)}% accuracy) at {scores['wpm']} WPM. Practice articulating multi-syllable terminology with steady pacing."
+    strengths = ["Solid voice projection on technical content", "Consistent reading effort"]
+    improvements = ["Maintain natural pauses at punctuation marks", "Enunciate multi-syllable domain keywords distinctly"]
+    pronunciation_guides = []
 
     try:
+        result = await generate_ai_response(prompt, system, model_preference=model)
         import re
         clean = result.strip()
         if clean.startswith("```"):
@@ -479,27 +705,51 @@ async def evaluate_reading(original_paragraph: str, spoken_text: str, topic: str
         json_match = re.search(r'\{[\s\S]*\}', clean)
         raw_json = json_match.group(0) if json_match else clean
         parsed = json.loads(raw_json)
-        # Ensure algorithmic metrics remain accurate
-        parsed["wordsCorrect"] = diff_baseline["wordsCorrect"]
-        parsed["wordsTotal"] = diff_baseline["wordsTotal"]
-        parsed["wordsAnalysis"] = diff_baseline["wordsAnalysis"]
-        if not parsed.get("missedWords"):
-            parsed["missedWords"] = diff_baseline["missedWords"]
-        if not parsed.get("mispronounced"):
-            parsed["mispronounced"] = diff_baseline["mispronounced"]
-        return parsed
+        
+        if parsed.get("detailedFeedback"):
+            detailed_feedback = parsed["detailedFeedback"]
+        if parsed.get("strengths"):
+            strengths = parsed["strengths"]
+        if parsed.get("improvements"):
+            improvements = parsed["improvements"]
+        if parsed.get("pronunciationGuides"):
+            pronunciation_guides = parsed["pronunciationGuides"]
     except Exception as e:
         print(f"[SPEAKING] evaluate_reading AI parsing notice: {e}")
 
-    # Robust fallback combining algorithmic comparison
-    diff_baseline["detailedFeedback"] = f"You read {diff_baseline['wordsCorrect']} out of {diff_baseline['wordsTotal']} words accurately ({round((diff_baseline['wordsCorrect']/max(diff_baseline['wordsTotal'],1))*100)}% accuracy). Practice articulating technical terminology with a steady pace."
-    diff_baseline["strengths"] = ["Strong reading effort on technical text", "Consistent voice projection"]
-    diff_baseline["improvements"] = ["Practice multi-syllable technical terms", "Pause naturally at periods to manage breathing"]
-    diff_baseline["pronunciationGuides"] = []
-    return diff_baseline
+    # Combine deterministic scores with AI qualitative coaching
+    return {
+        "status": "success",
+        "isAcceptable": True,
+        "overallScore": scores["overallScore"],
+        "accuracyScore": scores["accuracyScore"],
+        "pronunciationScore": scores["pronunciationScore"],
+        "fluencyScore": scores["fluencyScore"],
+        "paceScore": scores["paceScore"],
+        "pauseScore": scores["pauseScore"],
+        "vocabularyScore": scores["vocabularyScore"],
+        "wpm": scores["wpm"],
+        "wordsCorrect": scores["wordsCorrect"],
+        "wordsTotal": scores["wordsTotal"],
+        "missedWords": scores["missedWords"],
+        "mispronounced": scores["mispronounced"],
+        "extraWords": scores["extraWords"],
+        "repeatedWords": scores["repeatedWords"],
+        "wordsAnalysis": scores["wordsAnalysis"],
+        "technicalVocabStats": scores["technicalVocabStats"],
+        "detailedFeedback": detailed_feedback,
+        "strengths": strengths,
+        "improvements": improvements,
+        "pronunciationGuides": pronunciation_guides
+    }
 
 
-async def chat_speaking_coach(messages: list, scenario: str = "Tech Job Interview", difficulty: str = "Intermediate") -> dict:
+async def chat_speaking_coach(
+    messages: list,
+    scenario: str = "Tech Job Interview",
+    difficulty: str = "Intermediate",
+    model: str = "auto"
+) -> dict:
     """
     Interactive 2-way AI voice coach turn.
     Returns natural conversational reply and instant pronunciation/grammar feedback.
@@ -533,7 +783,8 @@ async def chat_speaking_coach(messages: list, scenario: str = "Tech Job Intervie
     }}
     """
     system = "You are an empathetic, encouraging AI English speaking partner. Return ONLY valid JSON with conversational response and constructive feedback."
-    result = await generate_ai_response(prompt, system)
+    result = await generate_ai_response(prompt, system, model_preference=model)
+
 
     try:
         clean = result.strip()
@@ -1035,21 +1286,45 @@ async def expand_news_article(title: str, summary: str, source: str = "", catego
     }
 
 
-async def transcribe_audio(audio_bytes: bytes, filename: str = "recording.webm") -> str:
-    """High-accuracy audio speech-to-text using Groq Whisper Large v3 Turbo"""
+async def transcribe_audio(audio_bytes: bytes, filename: str = "recording.webm") -> dict:
+    """High-accuracy audio speech-to-text using Groq Whisper Large v3 Turbo with confidence estimation"""
     if GROQ_API_KEY:
         try:
             headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
             files = {"file": (filename or "recording.webm", audio_bytes, "audio/webm")}
-            data = {"model": "whisper-large-v3-turbo", "language": "en"}
-            async with httpx.AsyncClient(timeout=20.0) as client:
+            data = {
+                "model": "whisper-large-v3-turbo",
+                "language": "en",
+                "response_format": "verbose_json"
+            }
+            async with httpx.AsyncClient(timeout=25.0) as client:
                 res = await client.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files=files, data=data)
                 if res.status_code == 200:
                     result = res.json()
-                    return result.get("text", "").strip()
+                    text = result.get("text", "").strip()
+                    segments = result.get("segments", [])
+                    
+                    # Calculate mean confidence from segment avg_logprob: conf = exp(avg_logprob)
+                    confidences = []
+                    for seg in segments:
+                        logprob = seg.get("avg_logprob")
+                        if logprob is not None:
+                            conf = max(0.0, min(1.0, math.exp(logprob)))
+                            confidences.append(conf)
+                    
+                    mean_confidence = round(sum(confidences) / len(confidences), 2) if confidences else 0.95
+
+                    return {
+                        "transcript": text,
+                        "confidence": mean_confidence,
+                        "duration": result.get("duration", 0),
+                        "segments": segments
+                    }
                 else:
                     print(f"[WARNING] Whisper Groq transcription HTTP {res.status_code}: {res.text}")
         except Exception as e:
             print(f"[WARNING] Whisper transcription failed: {e}")
-    return ""
+            
+    return {"transcript": "", "confidence": 0.0, "duration": 0, "segments": []}
+
 

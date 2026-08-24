@@ -6,6 +6,8 @@ class SpeakingRequest(BaseModel):
     topic: str
     transcript: str
     duration: int = 0
+    model: Optional[str] = "auto"
+
 
 
 class GrammarMistake(BaseModel):

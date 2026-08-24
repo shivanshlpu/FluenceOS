@@ -23,6 +23,8 @@ app.add_middleware(
 app.add_event_handler("startup", connect_db)
 app.add_event_handler("shutdown", disconnect_db)
 
+from app.services.ai_service import AVAILABLE_MODELS
+
 # Register routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(speaking.router, prefix="/api/speaking", tags=["Speaking"])
@@ -37,6 +39,14 @@ app.include_router(roadmap.router, prefix="/api/roadmap", tags=["Skill Roadmap"]
 @app.get("/")
 async def root():
     return {"message": "🧠 AI Growth OS API is running", "version": "1.0.0"}
+
+
+@app.get("/api/ai/models", tags=["AI"])
+@app.get("/api/models", tags=["AI"])
+async def list_ai_models():
+    """List verified active AI models available for selection across the OS"""
+    return AVAILABLE_MODELS
+
 
 
 @app.get("/health", tags=["Health"])

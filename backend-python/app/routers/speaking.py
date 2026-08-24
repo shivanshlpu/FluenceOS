@@ -1,6 +1,14 @@
 from fastapi import APIRouter, Depends, UploadFile, File
 from app.models.session import SpeakingRequest
-from app.services.ai_service import evaluate_speech, generate_topic_explanation, generate_reading_paragraph, evaluate_reading, chat_speaking_coach, transcribe_audio
+from app.services.ai_service import (
+    evaluate_speech,
+    generate_topic_explanation,
+    generate_reading_paragraph,
+    evaluate_reading,
+    chat_speaking_coach,
+    transcribe_audio,
+    AVAILABLE_MODELS
+)
 from app.services.auth_service import get_optional_user
 from app.database import get_db
 from datetime import datetime
@@ -17,26 +25,47 @@ class ReadingEvalRequest(BaseModel):
     originalParagraph: str
     spokenText: str
     duration: int = 0
+    model: Optional[str] = "auto"
+    sttConfidence: Optional[float] = 1.0
+    audioQualityMetrics: Optional[dict] = None
 
 
 class VoiceChatRequest(BaseModel):
     messages: list
     scenario: str = "Tech Job Interview"
     difficulty: str = "Intermediate"
+    model: Optional[str] = "auto"
+
+
+@router.get("/models")
+async def get_models():
+    """GET /api/speaking/models — List of verified active AI models available for selection"""
+    return AVAILABLE_MODELS
 
 
 @router.get("/generate-topic")
-async def get_topic_explanation(topic: str, user=Depends(get_optional_user)):
-    """GET /api/speaking/generate-topic?topic=Machine+Learning"""
-    explanation = await generate_topic_explanation(topic)
-    return {"topic": topic, "explanation": explanation}
+async def get_topic_explanation(
+    topic: str,
+    model: Optional[str] = "auto",
+    angle: Optional[str] = None,
+    seed: Optional[int] = None,
+    user=Depends(get_optional_user)
+):
+    """GET /api/speaking/generate-topic?topic=...&model=...&angle=...&seed=..."""
+    res = await generate_topic_explanation(topic, model=model or "auto", angle=angle, seed=seed)
+    return {
+        "topic": topic,
+        "explanation": res.get("explanation", ""),
+        "breakdown": res
+    }
 
 
 @router.post("/evaluate")
 async def evaluate_speaking_session(data: SpeakingRequest, user=Depends(get_optional_user)):
     """POST /api/speaking/evaluate — Core evaluation endpoint"""
-    evaluation = await evaluate_speech(data.transcript, data.topic)
+    evaluation = await evaluate_speech(data.transcript, data.topic, model=data.model or "auto")
     session_id = str(uuid.uuid4())
+
 
     pool = get_db()
     if pool and user:
@@ -198,29 +227,44 @@ async def get_speaking_stats(user=Depends(get_optional_user)):
 
 
 @router.get("/reading/paragraph")
-async def get_reading_paragraph(topic: str, level: str = "beginner", user=Depends(get_optional_user)):
-    """GET /api/speaking/reading/paragraph?topic=...&level=beginner"""
-    return await generate_reading_paragraph(topic, level)
+async def get_reading_paragraph(
+    topic: str,
+    level: str = "beginner",
+    model: Optional[str] = "auto",
+    angle: Optional[str] = None,
+    user=Depends(get_optional_user)
+):
+    """GET /api/speaking/reading/paragraph?topic=...&level=beginner&model=...&angle=..."""
+    return await generate_reading_paragraph(topic, level, model=model or "auto", angle=angle)
 
 
 @router.post("/reading/evaluate")
 async def evaluate_reading_session(data: ReadingEvalRequest, user=Depends(get_optional_user)):
     """POST /api/speaking/reading/evaluate"""
-    evaluation = await evaluate_reading(data.originalParagraph, data.spokenText, data.topic)
+    evaluation = await evaluate_reading(
+        original_paragraph=data.originalParagraph,
+        spoken_text=data.spokenText,
+        topic=data.topic,
+        duration=data.duration,
+        model=data.model or "auto",
+        audio_quality_metrics=data.audioQualityMetrics
+    )
     session_id = str(uuid.uuid4())
 
     pool = get_db()
-    if pool and user:
+    if pool and user and evaluation.get("isAcceptable", True):
         try:
             eval_json = {
                 "overallScore": evaluation.get("overallScore", 0),
+                "accuracyScore": evaluation.get("accuracyScore", 0),
+                "pronunciationScore": evaluation.get("pronunciationScore", 0),
                 "fluencyScore": evaluation.get("fluencyScore", 0),
-                "confidenceScore": evaluation.get("accuracyScore", 0),
+                "paceScore": evaluation.get("paceScore", 0),
+                "pauseScore": evaluation.get("pauseScore", 0),
+                "vocabularyScore": evaluation.get("vocabularyScore", 0),
                 "detailedFeedback": evaluation.get("detailedFeedback", ""),
                 "strengths": evaluation.get("strengths", []),
                 "improvements": evaluation.get("improvements", []),
-                "grammarMistakes": [],
-                "vocabularySuggestions": [],
                 "originalParagraph": data.originalParagraph
             }
 
@@ -253,13 +297,16 @@ async def evaluate_reading_session(data: ReadingEvalRequest, user=Depends(get_op
 @router.post("/chat")
 async def voice_chat_turn(data: VoiceChatRequest, user=Depends(get_optional_user)):
     """POST /api/speaking/chat — Real-time 2-way AI voice coach"""
-    return await chat_speaking_coach(data.messages, data.scenario, data.difficulty)
+    return await chat_speaking_coach(data.messages, data.scenario, data.difficulty, model=data.model or "auto")
 
 
 @router.post("/transcribe")
 async def transcribe_spoken_audio(file: UploadFile = File(...), user=Depends(get_optional_user)):
-    """POST /api/speaking/transcribe — Groq Whisper Large v3 Turbo audio transcription"""
+    """POST /api/speaking/transcribe — Groq Whisper Large v3 Turbo audio transcription with confidence"""
     content = await file.read()
-    transcript = await transcribe_audio(content, file.filename or "audio.webm")
-    return {"transcript": transcript}
+    res = await transcribe_audio(content, file.filename or "audio.webm")
+    if isinstance(res, dict):
+        return res
+    return {"transcript": str(res), "confidence": 0.95}
+
 

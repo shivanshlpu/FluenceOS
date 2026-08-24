@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Volume2, VolumeX, RefreshCw, Sparkles, Send, Award, CheckCircle2, AlertCircle, Play, Square, MessageSquare, Mic, MicOff, RotateCcw, Bot, User, Check, Lightbulb, Settings2 } from 'lucide-react';
+import { Volume2, VolumeX, RefreshCw, Sparkles, Send, Award, CheckCircle2, AlertCircle, Play, Square, MessageSquare, Mic, MicOff, RotateCcw, Bot, User, Check, Lightbulb, Settings2, Cpu } from 'lucide-react';
 import { useSpeechRecognition } from '../../../hooks/useSpeechRecognition';
 import { speakAIResponse, stopAllSpeech, getVoiceSettings } from '../../../services/voiceService';
 import VoiceSettingsModal from './VoiceSettingsModal';
+import ModelSelector, { DEFAULT_MODELS } from '../../common/ModelSelector';
 import { pythonAPI } from '../../../services/api';
 import { motion, AnimatePresence } from 'framer-motion';
+
 
 const SCENARIOS = [
     {
@@ -42,6 +44,7 @@ const FILLER_WORDS = ['um', 'uh', 'like', 'you know', 'actually', 'basically', '
 export default function ConversationEngine() {
     const [selectedScenario, setSelectedScenario] = useState(SCENARIOS[0]);
     const [difficulty, setDifficulty] = useState('Intermediate');
+    const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('preferred_ai_model') || 'auto');
     const [messages, setMessages] = useState([]);
     const [isSpeakingAI, setIsSpeakingAI] = useState(false);
     const [textInput, setTextInput] = useState('');
@@ -51,6 +54,7 @@ export default function ConversationEngine() {
     const [stats, setStats] = useState({ wpm: 0, fillerCount: 0, totalWords: 0 });
     const [showVoiceModal, setShowVoiceModal] = useState(false);
     const [voiceSettings, setVoiceSettings] = useState(getVoiceSettings());
+
 
     const messagesEndRef = useRef(null);
     const speechStartTimeRef = useRef(null);
@@ -177,8 +181,10 @@ export default function ConversationEngine() {
             const res = await pythonAPI.post('/api/speaking/chat', {
                 messages: updatedHistory.map(m => ({ role: m.role, content: m.content })),
                 scenario: selectedScenario.title,
-                difficulty: difficulty
+                difficulty: difficulty,
+                model: selectedModel
             });
+
 
             const aiReply = res?.reply || "That's a very interesting point! Could you elaborate a bit more on that?";
             const feedback = res?.feedback || null;
@@ -250,6 +256,14 @@ export default function ConversationEngine() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <div style={{ minWidth: '180px' }}>
+                        <ModelSelector
+                            selectedModel={selectedModel}
+                            onSelectModel={(m) => setSelectedModel(m)}
+                            compact={true}
+                        />
+                    </div>
+
                     <select
                         value={difficulty}
                         onChange={e => setDifficulty(e.target.value)}
@@ -265,6 +279,7 @@ export default function ConversationEngine() {
                             outline: 'none',
                         }}
                     >
+
                         <option value="Beginner">Beginner Level</option>
                         <option value="Intermediate">Intermediate Level</option>
                         <option value="Advanced">Advanced Level</option>

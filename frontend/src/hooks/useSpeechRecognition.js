@@ -1,27 +1,73 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { pythonAPI } from '../services/api';
+import { AudioPipeline, AUDIO_CONFIG } from '../services/audioPipeline';
 
 /**
- * Robust Cross-Platform Speech Recognition Hook (Android, iOS & Desktop)
- * - Zero microphone lock contention on Mobile Android / iOS
- * - Auto-commit interim text so pauses never wipe spoken words
- * - Real-time word streaming to response box
- * - Whisper AI high-accuracy transcription fallback
+ * Recording Finite State Machine States:
+ * IDLE -> INITIALIZING -> LISTENING -> SPEECH_DETECTED -> RECORDING -> PAUSED_IN_SPEECH -> SILENCE_DETECTED -> PROCESSING -> SCORING -> RESULT
+ */
+export const RECORDING_STATES = {
+    IDLE: 'IDLE',
+    INITIALIZING: 'INITIALIZING',
+    LISTENING: 'LISTENING',
+    SPEECH_DETECTED: 'SPEECH_DETECTED',
+    RECORDING: 'RECORDING',
+    PAUSED_IN_SPEECH: 'PAUSED_IN_SPEECH',
+    SILENCE_DETECTED: 'SILENCE_DETECTED',
+    PROCESSING: 'PROCESSING',
+    SCORING: 'SCORING',
+    RESULT: 'RESULT',
+    REJECTED: 'REJECTED',
+    ERROR: 'ERROR',
+};
+
+/**
+ * Enterprise Audio-Processing & Speech Recognition Hook
+ * 
+ * - WebRTC Audio Constraints with Echo Cancellation, Noise Suppression, and AGC
+ * - High-pass 80Hz BiquadFilter to cancel air-conditioner and fan rumble
+ * - Real-time Web Audio VAD with dynamic noise-floor tracking and hysteresis
+ * - Real spectrum analyzer data for accurate UI sound-wave visualization
+ * - Confidence-score aggregation across recognition alternatives
+ * - Audio Quality Detection & Pre-scoring Gating (detects noise, low volume, clipping, no speech)
+ * - Clean device-change handling for Bluetooth & USB headsets
  */
 export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage = 'en-IN') => {
+    // Transcript State
     const [transcript, setTranscript] = useState('');
     const [interimTranscript, setInterimTranscript] = useState('');
+    const [confidence, setConfidence] = useState(1.0);
+    const [confidenceHistory, setConfidenceHistory] = useState([]);
+    
+    // Engine & Lifecycle State
+    const [recordingState, setRecordingState] = useState(RECORDING_STATES.IDLE);
     const [isListening, setIsListening] = useState(false);
-    const [audioLevel, setAudioLevel] = useState(0);
     const [language, setLanguage] = useState(initialLanguage);
     const [error, setError] = useState(null);
     const [isTranscribingAudio, setIsTranscribingAudio] = useState(false);
     const [recognitionMode, setRecognitionMode] = useState('live'); // 'live' | 'whisper'
 
+    // Real-Time Audio Metrics (powered by AudioPipeline AnalyserNode)
+    const [audioMetrics, setAudioMetrics] = useState({
+        rmsDb: -60,
+        noiseFloorDb: -55,
+        snrDb: 0,
+        visualLevel: 0,
+        peak: 0,
+        isClipped: false,
+        isSpeechActive: false,
+        frequencies: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    });
+
+    // Session Quality Report (generated upon completion)
+    const [qualityReport, setQualityReport] = useState(null);
+
+    // References
     const recognitionRef = useRef(null);
     const mediaStreamRef = useRef(null);
     const mediaRecorderRef = useRef(null);
     const audioChunksRef = useRef([]);
+    const audioPipelineRef = useRef(null);
 
     const isListeningRef = useRef(false);
     const isMountedRef = useRef(true);
@@ -33,6 +79,7 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
     const lastInterimRef = useRef('');
     const restartTimerRef = useRef(null);
     const silenceTimerRef = useRef(null);
+    const confidencesRef = useRef([]);
 
     const isMobile = typeof navigator !== 'undefined' && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
@@ -55,18 +102,40 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
         lastInterimRef.current = interimChunk;
     }, []);
 
-    // Stop media recording cleanly
-    const stopAudioRecording = useCallback(() => {
+    // Clean up media streams & audio pipeline
+    const stopAudioHardware = useCallback(() => {
         if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
             try {
                 mediaRecorderRef.current.stop();
             } catch (e) {}
         }
+
+        if (audioPipelineRef.current) {
+            try {
+                audioPipelineRef.current.cleanup();
+            } catch (e) {}
+            audioPipelineRef.current = null;
+        }
+
         if (mediaStreamRef.current) {
-            mediaStreamRef.current.getTracks().forEach(track => track.stop());
+            try {
+                mediaStreamRef.current.getTracks().forEach(track => {
+                    track.stop();
+                });
+            } catch (e) {}
             mediaStreamRef.current = null;
         }
-        setAudioLevel(0);
+
+        setAudioMetrics({
+            rmsDb: -60,
+            noiseFloorDb: -55,
+            snrDb: 0,
+            visualLevel: 0,
+            peak: 0,
+            isClipped: false,
+            isSpeechActive: false,
+            frequencies: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        });
     }, []);
 
     const cleanupRecognition = useCallback(() => {
@@ -88,8 +157,8 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
             } catch (e) {}
             recognitionRef.current = null;
         }
-        stopAudioRecording();
-    }, [stopAudioRecording]);
+        stopAudioHardware();
+    }, [stopAudioHardware]);
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -105,31 +174,35 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
         sessionFinalTextRef.current = '';
         lastInterimRef.current = '';
         audioChunksRef.current = [];
+        confidencesRef.current = [];
         setTranscript('');
         setInterimTranscript('');
+        setConfidence(1.0);
+        setConfidenceHistory([]);
+        setQualityReport(null);
+        setRecordingState(RECORDING_STATES.IDLE);
     }, []);
 
-    // Create browser SpeechRecognition instance
+    // Create Browser Web Speech Recognition instance
     const createRecognitionInstance = useCallback(() => {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
-            setError('Speech recognition is not supported in this browser. You can use Whisper AI Mode.');
+            setError('Web Speech recognition is not supported in this browser. You can use Whisper AI Mode.');
             return null;
         }
 
         const recognition = new SpeechRecognition();
-        // On Android Chrome, continuous=false with auto-restart provides the most reliable speech results
         recognition.continuous = !isMobile;
         recognition.interimResults = true;
         recognition.lang = languageRef.current || 'en-IN';
-        recognition.maxAlternatives = 1;
+        recognition.maxAlternatives = 3;
 
         recognition.onstart = () => {
             if (!isMountedRef.current) return;
             isStartingRef.current = false;
             setError(null);
             setIsListening(true);
-            setAudioLevel(50); // Visual indicator active
+            setRecordingState(RECORDING_STATES.LISTENING);
         };
 
         recognition.onresult = (event) => {
@@ -137,11 +210,23 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
 
             let currentFinal = '';
             let currentInterim = '';
+            let totalConfidence = 0;
+            let confCount = 0;
 
             for (let i = event.resultIndex || 0; i < event.results.length; i++) {
                 const res = event.results[i];
                 if (!res || !res[0]) continue;
-                const text = res[0].transcript;
+                
+                const alt = res[0];
+                const text = alt.transcript;
+                
+                // Track confidence score
+                if (alt.confidence !== undefined && alt.confidence > 0) {
+                    totalConfidence += alt.confidence;
+                    confCount++;
+                    confidencesRef.current.push(alt.confidence);
+                }
+
                 if (res.isFinal) {
                     currentFinal += (currentFinal ? ' ' : '') + text.trim();
                 } else {
@@ -149,9 +234,13 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
                 }
             }
 
-            // On mobile devices where resultIndex is 0
+            if (confCount > 0) {
+                const avgConf = Math.round((totalConfidence / confCount) * 100) / 100;
+                setConfidence(avgConf);
+                setConfidenceHistory([...confidencesRef.current]);
+            }
+
             if (isMobile && !currentFinal && currentInterim) {
-                // If text was received, track it
                 lastInterimRef.current = currentInterim;
             }
 
@@ -161,6 +250,7 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
             lastInterimRef.current = currentInterim;
 
             updateFullTranscript(sessionFinalTextRef.current, currentInterim);
+            setRecordingState(RECORDING_STATES.RECORDING);
 
             if (onSilenceDetected) {
                 if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
@@ -169,14 +259,14 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
                     if (isMountedRef.current && isListeningRef.current && fullText) {
                         onSilenceDetected(fullText);
                     }
-                }, 3000);
+                }, 3500);
             }
         };
 
         recognition.onerror = (e) => {
             if (!isMountedRef.current) return;
             if (e.error === 'no-speech' || e.error === 'aborted') {
-                return; // Normal pause during speech
+                return; // Normal pause in speech
             }
 
             console.warn('[SPEECH] Recognition error:', e.error);
@@ -184,6 +274,7 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
             if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
                 isListeningRef.current = false;
                 setIsListening(false);
+                setRecordingState(RECORDING_STATES.ERROR);
                 setError('Microphone permission denied. Please allow microphone access in your browser settings.');
                 cleanupRecognition();
             }
@@ -192,7 +283,7 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
         recognition.onend = () => {
             if (!isMountedRef.current) return;
 
-            // Auto-commit any spoken words from this session
+            // Auto-commit spoken words
             const pendingText = (sessionFinalTextRef.current || lastInterimRef.current).trim();
             if (pendingText) {
                 accumulatedTextRef.current = (accumulatedTextRef.current + (accumulatedTextRef.current ? ' ' : '') + pendingText).trim();
@@ -223,21 +314,49 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
             } else {
                 setIsListening(false);
                 setInterimTranscript('');
-                setAudioLevel(0);
             }
         };
 
         return recognition;
     }, [cleanupRecognition, isMobile, onSilenceDetected, updateFullTranscript]);
 
-    // Start Live Web Speech
-    const startListening = useCallback(() => {
+    /**
+     * Start Live Web Speech with full Web Audio Pipeline & VAD
+     */
+    const startListening = useCallback(async () => {
         setError(null);
+        setQualityReport(null);
         isListeningRef.current = true;
         setIsListening(true);
         isStartingRef.current = true;
+        setRecordingState(RECORDING_STATES.INITIALIZING);
 
         try {
+            // 1. Initialize Web Audio Pipeline with WebRTC Noise Suppression & 80Hz rumble filter
+            const pipeline = new AudioPipeline(AUDIO_CONFIG);
+            audioPipelineRef.current = pipeline;
+
+            pipeline.onAudioMetrics = (metrics) => {
+                if (!isMountedRef.current) return;
+                setAudioMetrics(metrics);
+            };
+
+            pipeline.onVADChange = (isSpeechActive) => {
+                if (!isMountedRef.current || !isListeningRef.current) return;
+                if (isSpeechActive) {
+                    setRecordingState(RECORDING_STATES.SPEECH_DETECTED);
+                } else {
+                    setRecordingState(RECORDING_STATES.PAUSED_IN_SPEECH);
+                }
+            };
+
+            pipeline.onDeviceChange = () => {
+                console.log('[SPEECH] Headset/Device change handled seamlessly.');
+            };
+
+            await pipeline.initialize();
+
+            // 2. Start Live Web Speech Engine
             const recognition = createRecognitionInstance();
             if (recognition) {
                 recognitionRef.current = recognition;
@@ -246,22 +365,46 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
         } catch (e) {
             isStartingRef.current = false;
             console.warn('[SPEECH] Start error:', e);
+            setError(e.message || 'Could not start audio recording.');
+            setRecordingState(RECORDING_STATES.ERROR);
         }
     }, [createRecognitionInstance]);
 
-    // Start Whisper AI Direct Recording Mode
+    /**
+     * Start Whisper AI Direct Recording Mode with Web Audio Analysis & Quality Gating
+     */
     const startWhisperRecording = useCallback(async () => {
         setError(null);
+        setQualityReport(null);
         audioChunksRef.current = [];
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            mediaStreamRef.current = stream;
+        isListeningRef.current = true;
+        setIsListening(true);
+        setRecordingState(RECORDING_STATES.INITIALIZING);
 
+        try {
+            // 1. Initialize Web Audio Pipeline with constraints
+            const pipeline = new AudioPipeline(AUDIO_CONFIG);
+            audioPipelineRef.current = pipeline;
+
+            pipeline.onAudioMetrics = (metrics) => {
+                if (!isMountedRef.current) return;
+                setAudioMetrics(metrics);
+            };
+
+            pipeline.onVADChange = (isSpeechActive) => {
+                if (!isMountedRef.current || !isListeningRef.current) return;
+                setRecordingState(isSpeechActive ? RECORDING_STATES.SPEECH_DETECTED : RECORDING_STATES.PAUSED_IN_SPEECH);
+            };
+
+            await pipeline.initialize();
+            mediaStreamRef.current = pipeline.mediaStream;
+
+            // 2. Start MediaRecorder
             const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
                 ? 'audio/webm;codecs=opus'
                 : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4');
 
-            const recorder = new MediaRecorder(stream, { mimeType });
+            const recorder = new MediaRecorder(pipeline.mediaStream, { mimeType });
             mediaRecorderRef.current = recorder;
 
             recorder.ondataavailable = (event) => {
@@ -270,16 +413,20 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
                 }
             };
 
-            recorder.start(500);
-            isListeningRef.current = true;
-            setIsListening(true);
-            setAudioLevel(60);
+            recorder.start(250);
+            setRecordingState(RECORDING_STATES.LISTENING);
         } catch (err) {
             console.error('[WHISPER] Audio record error:', err);
             setError('Could not access microphone for Whisper recording. Please check permissions.');
+            setRecordingState(RECORDING_STATES.ERROR);
+            setIsListening(false);
+            isListeningRef.current = false;
         }
     }, []);
 
+    /**
+     * Stop Listening and evaluate session audio quality
+     */
     const stopListening = useCallback(() => {
         isListeningRef.current = false;
         isStartingRef.current = false;
@@ -295,10 +442,30 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
             setInterimTranscript('');
         }
 
+        // Run session audio quality evaluation
+        let report = null;
+        if (audioPipelineRef.current) {
+            try {
+                report = audioPipelineRef.current.evaluateSessionQuality();
+                setQualityReport(report);
+            } catch (e) {
+                console.warn('[SPEECH] Quality evaluation error:', e);
+            }
+        }
+
+        if (report && !report.isAcceptable) {
+            setRecordingState(RECORDING_STATES.REJECTED);
+        } else {
+            setRecordingState(RECORDING_STATES.PROCESSING);
+        }
+
         cleanupRecognition();
+        return report;
     }, [cleanupRecognition]);
 
-    // Transcribe with Groq Whisper AI (Fast & 100% accurate)
+    /**
+     * Transcribe with Groq Whisper AI (With verbose confidence & segment analysis)
+     */
     const refineWithWhisper = useCallback(async () => {
         if (audioChunksRef.current.length === 0) return null;
         setIsTranscribingAudio(true);
@@ -309,7 +476,7 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
 
             const res = await pythonAPI.post('/api/speaking/transcribe', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
-                timeout: 20000,
+                timeout: 25000,
             });
 
             if (res && res.transcript) {
@@ -318,6 +485,9 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
                     accumulatedTextRef.current = whisperText;
                     setTranscript(whisperText);
                     setInterimTranscript('');
+                    if (res.confidence) {
+                        setConfidence(res.confidence);
+                    }
                     return whisperText;
                 }
             }
@@ -330,16 +500,25 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
     }, []);
 
     return {
+        // Text & Confidence
         transcript,
         interimTranscript,
+        confidence,
+        confidenceHistory,
+        // State Machine
+        recordingState,
+        setRecordingState,
         isListening,
-        audioLevel,
         language,
         setLanguage,
         error,
         isTranscribingAudio,
         recognitionMode,
         setRecognitionMode,
+        // Audio Pipeline Metrics & Quality Report
+        audioMetrics,
+        qualityReport,
+        // Actions
         startListening,
         startWhisperRecording,
         stopListening,

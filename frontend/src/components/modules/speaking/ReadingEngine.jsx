@@ -1,14 +1,16 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { useSpeechRecognition } from '../../../hooks/useSpeechRecognition';
+import { useSpeechRecognition, RECORDING_STATES } from '../../../hooks/useSpeechRecognition';
 import { speakAIResponse, stopAllSpeech, getVoiceSettings } from '../../../services/voiceService';
 import VoiceSettingsModal from './VoiceSettingsModal';
+import ModelSelector from '../../common/ModelSelector';
 import { pythonAPI } from '../../../services/api';
 import ReadingFeedbackCard from './ReadingFeedbackCard';
+
 import {
     BookOpen, Mic, MicOff, RotateCcw, Send, Sparkles,
     Loader, Volume2, VolumeX, Settings2, Globe, CheckCircle2,
     Code, Cpu, Database, Network, Cloud, ShieldCheck, Terminal, Layers,
-    Edit3, Wand2, Radio, Check
+    Edit3, Wand2, Radio, Check, AlertTriangle, Activity, Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -142,10 +144,7 @@ function levDist(a, b) {
     return row[b.length];
 }
 
-// Highlight words in paragraph in real-time:
-// 🟢 Green = Read accurately
-// 🔴 Red Wavy Underline = Stumbled / Mispronounced word
-// ⚪ Neutral = Not yet read
+// Highlight words in paragraph in real-time
 function HighlightedParagraph({ paragraph, spokenWords }) {
     const tokens = paragraph.split(/(\s+)/);
     const spokenClean = spokenWords.map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ''));
@@ -175,11 +174,9 @@ function HighlightedParagraph({ paragraph, spokenWords }) {
 
                     if (bestMatchIdx !== -1) {
                         if (bestDist === 0) {
-                            // Accurate word
                             status = 'correct';
                             spokenPointer += bestMatchIdx + 1;
                         } else if (bestDist <= Math.max(1, Math.floor(clean.length / 3))) {
-                            // Mispronounced or stumbled -> RED LINE
                             status = 'struggling';
                             spokenPointer += bestMatchIdx + 1;
                         }
@@ -225,26 +222,66 @@ function HighlightedParagraph({ paragraph, spokenWords }) {
     );
 }
 
-// Live Sound Waves Audio Visualizer
-function SoundWaves({ active }) {
-    const bars = [12, 24, 38, 48, 30, 44, 20, 34, 46, 26, 18, 40];
+// True Web Audio Analyser Real-Time Frequency Spectrum Visualizer
+function RealSpectrumVisualizer({ audioMetrics, isListening }) {
+    const frequencies = audioMetrics?.frequencies || [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const isSpeechActive = audioMetrics?.isSpeechActive;
+    const snr = audioMetrics?.snrDb || 0;
+    const isClipped = audioMetrics?.isClipped;
+
     return (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px', height: '32px' }}>
-            {bars.map((maxH, idx) => {
-                const calculatedH = active ? Math.max(8, Math.round(maxH * 0.7 + Math.random() * 12)) : 4;
-                return (
-                    <div
-                        key={idx}
-                        style={{
-                            width: '4px',
-                            height: `${calculatedH}px`,
-                            background: active ? '#10b981' : 'rgba(255,255,255,0.2)',
-                            borderRadius: '4px',
-                            transition: 'height 0.1s ease',
-                        }}
-                    />
-                );
-            })}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', margin: '8px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '4px', height: '38px' }}>
+                {frequencies.slice(0, 16).map((val, idx) => {
+                    // Convert 0-255 frequency bin into bar height (4px min to 36px max)
+                    const normalized = isListening ? (val / 255) : 0;
+                    const h = Math.max(4, Math.round(normalized * 34));
+                    
+                    let barColor = 'rgba(255,255,255,0.2)';
+                    if (isListening) {
+                        if (isClipped) {
+                            barColor = '#ef4444';
+                        } else if (isSpeechActive) {
+                            barColor = '#10b981';
+                        } else {
+                            barColor = 'rgba(96, 165, 250, 0.4)';
+                        }
+                    }
+
+                    return (
+                        <div
+                            key={idx}
+                            style={{
+                                width: '5px',
+                                height: `${h}px`,
+                                background: barColor,
+                                borderRadius: '4px',
+                                transition: 'height 0.08s ease, background 0.15s ease',
+                                boxShadow: isSpeechActive ? '0 0 8px rgba(16, 185, 129, 0.4)' : 'none'
+                            }}
+                        />
+                    );
+                })}
+            </div>
+
+            {/* VAD & SNR Live Diagnostics Badge */}
+            {isListening && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', fontWeight: 700 }}>
+                    {isClipped ? (
+                        <span style={{ color: '#f87171', display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(239,68,68,0.15)', padding: '2px 8px', borderRadius: '12px' }}>
+                            <AlertTriangle size={12} /> Volume Peaking (Move slightly back)
+                        </span>
+                    ) : isSpeechActive ? (
+                        <span style={{ color: '#34d399', display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(16,185,129,0.15)', padding: '2px 8px', borderRadius: '12px' }}>
+                            <Activity size={12} /> Speech Active · SNR: +{snr} dB
+                        </span>
+                    ) : (
+                        <span style={{ color: '#93c5fd', display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(96,165,250,0.12)', padding: '2px 8px', borderRadius: '12px' }}>
+                            <span>⏸️</span> Paused / Waiting for speech · Noise: {audioMetrics.noiseFloorDb} dBFS
+                        </span>
+                    )}
+                </div>
+            )}
         </div>
     );
 }
@@ -252,12 +289,14 @@ function SoundWaves({ active }) {
 export default function ReadingEngine() {
     const [topic, setTopic] = useState('');
     const [level, setLevel] = useState('intermediate');
+    const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('preferred_ai_model') || 'auto');
     const [selectedAccent, setSelectedAccent] = useState('en-IN');
     const [voiceEngineMode, setVoiceEngineMode] = useState('live'); // 'live' | 'whisper'
     const [paragraphData, setParagraphData] = useState(null);
     const [phase, setPhase] = useState('input'); // input | read | record | result
     const [loading, setLoading] = useState(false);
     const [evaluation, setEvaluation] = useState(null);
+    const [rejectionNotice, setRejectionNotice] = useState(null);
     const [startTime, setStartTime] = useState(null);
     const [durationSeconds, setDurationSeconds] = useState(0);
     const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -267,10 +306,14 @@ export default function ReadingEngine() {
     const {
         transcript,
         interimTranscript,
+        confidence,
+        recordingState,
         isListening,
         setLanguage,
         error: micError,
         isTranscribingAudio,
+        audioMetrics,
+        qualityReport,
         startListening,
         startWhisperRecording,
         stopListening,
@@ -309,9 +352,10 @@ export default function ReadingEngine() {
         if (!activeTopic.trim()) return;
         setLoading(true);
         stopNativeAudio();
+        setRejectionNotice(null);
 
         try {
-            const data = await pythonAPI.get(`/api/speaking/reading/paragraph?topic=${encodeURIComponent(activeTopic)}&level=${level}`);
+            const data = await pythonAPI.get(`/api/speaking/reading/paragraph?topic=${encodeURIComponent(activeTopic)}&level=${level}&model=${encodeURIComponent(selectedModel)}`);
             if (data && data.paragraph) {
                 setParagraphData(data);
                 setTopic(activeTopic);
@@ -321,6 +365,7 @@ export default function ReadingEngine() {
             }
         } catch (err) {
             console.warn('[SPEAKING] Paragraph fetch fallback:', err);
+
             const cleanTopic = activeTopic.trim();
             setParagraphData({
                 paragraph: `In computer science and modern software engineering, ${cleanTopic} is a foundational pillar for building robust, high-performance systems. When designing scalable solutions around ${cleanTopic}, software engineers evaluate algorithmic efficiency, memory complexity, and fault tolerance under high-concurrency production workloads. Practicing clear verbal articulation of ${cleanTopic} empowers you to succeed in technical interviews and system design reviews. Speak with a steady, confident rhythm, articulate key technical terms distinctly, and emphasize core architectural principles.`,
@@ -344,6 +389,7 @@ export default function ReadingEngine() {
     const handleStartRecording = () => {
         stopNativeAudio();
         resetTranscript();
+        setRejectionNotice(null);
         setStartTime(Date.now());
 
         if (voiceEngineMode === 'whisper') {
@@ -357,6 +403,7 @@ export default function ReadingEngine() {
     const handleRestartRecording = () => {
         stopListening();
         resetTranscript();
+        setRejectionNotice(null);
         setStartTime(Date.now());
         setTimeout(() => {
             if (voiceEngineMode === 'whisper') {
@@ -379,8 +426,9 @@ export default function ReadingEngine() {
     const handleSubmit = async () => {
         const duration = Math.max(1, Math.round((Date.now() - (startTime || Date.now())) / 1000));
         setDurationSeconds(duration);
-        stopListening();
+        const report = stopListening();
         setLoading(true);
+        setRejectionNotice(null);
 
         let activeSpokenText = `${transcript} ${interimTranscript}`.trim();
 
@@ -397,39 +445,74 @@ export default function ReadingEngine() {
             }
         }
 
+        // Check client-side quality report
+        const qualityMetrics = report?.metrics || {
+            snrDb: audioMetrics.snrDb,
+            avgSpeechRmsDb: audioMetrics.rmsDb,
+            avgNoiseFloorDb: audioMetrics.noiseFloorDb,
+            clippingRatio: audioMetrics.isClipped ? 0.05 : 0.0,
+            durationSec: duration
+        };
+
         try {
             const result = await pythonAPI.post('/api/speaking/reading/evaluate', {
                 topic,
                 originalParagraph: paragraphData.paragraph,
                 spokenText: activeSpokenText,
                 duration,
+                model: selectedModel,
+                sttConfidence: confidence,
+                audioQualityMetrics: qualityMetrics
             });
 
             if (result && result.evaluation) {
-                setEvaluation(result.evaluation);
-                setPhase('result');
+                const evalData = result.evaluation;
+                if (evalData.status === 'rejected' || evalData.isAcceptable === False || evalData.isAcceptable === false) {
+                    // Audio rejected due to quality gate
+                    setRejectionNotice({
+                        reason: evalData.rejectionReason,
+                        message: evalData.rejectionMessage || evalData.detailedFeedback || 'Audio quality was too low to evaluate reliably.'
+                    });
+                    setPhase('record');
+                } else {
+                    setEvaluation(evalData);
+                    setPhase('result');
+                }
             } else {
-                throw new Error('Invalid evaluation result');
+                throw new Error('Invalid evaluation response');
             }
         } catch (err) {
-            console.error('[SPEAKING] Reading evaluation fallback triggered:', err);
+            console.error('[SPEAKING] Reading evaluation error:', err);
+            // Fallback evaluation with local alignment & scoring
             const origWords = paragraphData.paragraph.split(/\s+/);
             const wordsSpoken = activeSpokenText.split(/\s+/).filter(Boolean).length;
             const accuracy = Math.min(10, Math.round((wordsSpoken / Math.max(origWords.length, 1)) * 10 * 10) / 10);
+            const fluency = Math.min(10, Math.round((Math.max(1, 10 - Math.abs(wordsSpoken - origWords.length) * 0.3)) * 10) / 10);
 
             setEvaluation({
+                overallScore: Math.round(((accuracy * 0.6) + (fluency * 0.4)) * 10) / 10,
                 accuracyScore: accuracy,
-                fluencyScore: 7.5,
-                overallScore: Math.round(((accuracy + 7.5) / 2) * 10) / 10,
+                pronunciationScore: accuracy,
+                fluencyScore: fluency,
+                paceScore: 8.5,
+                pauseScore: 8.0,
+                vocabularyScore: accuracy,
+                wpm: duration > 0 ? Math.round((wordsSpoken / duration) * 60) : 130,
                 wordsCorrect: wordsSpoken,
                 wordsTotal: origWords.length,
                 missedWords: origWords.slice(wordsSpoken).slice(0, 8),
                 mispronounced: [],
                 extraWords: [],
-                detailedFeedback: `You completed the technical reading with ${wordsSpoken} detected words (${Math.round((wordsSpoken / origWords.length) * 100)}% coverage). Keep practicing technical articulation!`,
+                repeatedWords: [],
+                detailedFeedback: `You completed the technical reading with ${wordsSpoken} detected words (${Math.round((wordsSpoken / origWords.length) * 100)}% coverage). Practice steady articulation on domain terms.`,
                 strengths: ['Clear voice projection', 'Solid reading effort on technical text'],
                 improvements: ['Maintain steady pacing through multi-syllable terms', 'Pause naturally at periods'],
-                pronunciationGuides: []
+                pronunciationGuides: [],
+                wordsAnalysis: origWords.map((w, i) => ({
+                    word: w,
+                    status: i < wordsSpoken ? 'correct' : 'omitted',
+                    spoken: i < wordsSpoken ? w : ''
+                }))
             });
             setPhase('result');
         } finally {
@@ -443,6 +526,7 @@ export default function ReadingEngine() {
         setTopic('');
         setParagraphData(null);
         setEvaluation(null);
+        setRejectionNotice(null);
         resetTranscript();
     };
 
@@ -469,7 +553,7 @@ export default function ReadingEngine() {
                                             CSE Technical Reading & Pronunciation Hub
                                         </h3>
                                         <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '3px 0 0 0' }}>
-                                            Read technical passages with real-time word feedback — correct words turn green, mispronounced words show red lines
+                                            Read technical passages with real-time VAD noise filtering, word alignment & multi-metric scoring
                                         </p>
                                     </div>
                                 </div>
@@ -539,6 +623,18 @@ export default function ReadingEngine() {
                                         </div>
                                     );
                                 })}
+                            </div>
+
+                            {/* Model Selector Bar */}
+                            <div style={{ marginBottom: '16px' }}>
+                                <label style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+                                    ⚡ AI Generation Engine:
+                                </label>
+                                <ModelSelector
+                                    selectedModel={selectedModel}
+                                    onSelectModel={(m) => setSelectedModel(m)}
+                                    compact={true}
+                                />
                             </div>
 
                             {/* Custom Topic Input */}
@@ -686,9 +782,9 @@ export default function ReadingEngine() {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                     <Radio size={16} color="#10b981" />
                                     <div>
-                                        <div style={{ fontSize: '13px', fontWeight: 800, color: '#fff' }}>Speech Recognition Mode</div>
+                                        <div style={{ fontSize: '13px', fontWeight: 800, color: '#fff' }}>Speech Recognition Engine</div>
                                         <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                                            {voiceEngineMode === 'live' ? '⚡ Real-time Live Speech' : '🎙️ Groq Whisper AI Studio Mode'}
+                                            {voiceEngineMode === 'live' ? '⚡ Real-time Live Web Speech (Low latency)' : '🎙️ Groq Whisper AI Studio Mode (High accuracy)'}
                                         </div>
                                     </div>
                                 </div>
@@ -703,7 +799,7 @@ export default function ReadingEngine() {
                                             fontSize: '12px', fontWeight: 700, cursor: 'pointer'
                                         }}
                                     >
-                                        🎙️ Live Browser Speech
+                                        🎙️ Live Web Speech
                                     </button>
                                     <button
                                         onClick={() => setVoiceEngineMode('whisper')}
@@ -780,32 +876,52 @@ export default function ReadingEngine() {
                     </motion.div>
                 )}
 
-                {/* STEP 3: Live Recording with Sound Waves & Real-Time Word Highlighting */}
+                {/* STEP 3: Live Recording with Real-time Spectrum, VAD & Live Highlighting */}
                 {phase === 'record' && paragraphData && (
                     <motion.div key="record" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
                         style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
-                        {/* Mic Indicator + Live Audio Level Visualizer */}
+                        {/* Rejection Notice Banner (If audio was too noisy / quiet) */}
+                        {rejectionNotice && (
+                            <div style={{
+                                padding: '14px 18px',
+                                borderRadius: '12px',
+                                background: 'rgba(239, 68, 68, 0.15)',
+                                border: '1px solid #ef4444',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '12px',
+                                color: '#fff',
+                            }}>
+                                <AlertTriangle size={24} color="#f87171" style={{ flexShrink: 0 }} />
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ fontWeight: 800, color: '#f87171', fontSize: '14px' }}>Audio Quality Check Notice</div>
+                                    <div style={{ fontSize: '12.5px', color: '#fca5a5', marginTop: '2px' }}>{rejectionNotice.message}</div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Mic Indicator + Live Real-time Frequency Spectrum Visualizer */}
                         <div style={{ ...cardStyle, textAlign: 'center', paddingTop: '20px', paddingBottom: '20px' }}>
                             <div style={{
-                                width: '70px', height: '70px', margin: '0 auto 12px',
+                                width: '68px', height: '68px', margin: '0 auto 8px',
                                 borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                background: isListening ? '#10b981' : 'var(--bg-elevated-3)',
-                                boxShadow: isListening ? '0 0 25px rgba(16, 185, 129, 0.6)' : 'none',
-                                transition: 'all 0.2s ease',
+                                background: isListening ? (audioMetrics.isSpeechActive ? '#10b981' : '#059669') : 'var(--bg-elevated-3)',
+                                boxShadow: isListening ? (audioMetrics.isSpeechActive ? '0 0 25px rgba(16, 185, 129, 0.7)' : '0 0 15px rgba(16, 185, 129, 0.3)') : 'none',
+                                transition: 'all 0.15s ease',
                             }}>
-                                {isListening ? <Mic size={32} color="#fff" /> : <MicOff size={32} color="var(--text-muted)" />}
+                                {isListening ? <Mic size={30} color="#fff" /> : <MicOff size={30} color="var(--text-muted)" />}
                             </div>
 
-                            {/* Sound Waves */}
-                            <SoundWaves active={isListening} />
+                            {/* True Web Audio Analyser Real-Time Frequency Spectrum */}
+                            <RealSpectrumVisualizer audioMetrics={audioMetrics} isListening={isListening} />
 
-                            <p style={{ fontWeight: 800, fontSize: '15.5px', color: isListening ? '#34d399' : 'var(--text-muted)', margin: '8px 0 2px 0' }}>
-                                {isListening ? '🟢 Microphone Listening · Speak At Your Own Pace' : '⏹️ Microphone Stopped'}
+                            <p style={{ fontWeight: 800, fontSize: '15px', color: isListening ? '#34d399' : 'var(--text-muted)', margin: '4px 0 2px 0' }}>
+                                {isListening ? '🟢 Microphone Listening · Speak Passage At Your Own Pace' : '⏹️ Microphone Stopped'}
                             </p>
 
-                            <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', margin: 0 }}>
-                                Pausing is 100% fine — your words are preserved continuously · Accent: <strong style={{ color: '#60a5fa' }}>{selectedAccent}</strong>
+                            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0 }}>
+                                High-pass 80Hz rumble filter & adaptive VAD active · Pausing is 100% fine
                             </p>
 
                             {micError && (
@@ -838,7 +954,7 @@ export default function ReadingEngine() {
                                 <HighlightedParagraph paragraph={paragraphData.paragraph} spokenWords={spokenWords} />
                             </div>
 
-                            {/* Live Spoken Response Box (Auto-Saved on Pauses) */}
+                            {/* Live Spoken Response Box */}
                             <div style={{ marginBottom: '16px' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                                     <label style={{ fontSize: '11px', fontWeight: 800, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -920,11 +1036,12 @@ export default function ReadingEngine() {
                             topic={topic}
                             originalParagraph={paragraphData?.paragraph}
                             duration={durationSeconds}
+                            audioMetrics={audioMetrics}
                         />
 
                         <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
                             <button
-                                onClick={() => { setPhase('read'); resetTranscript(); }}
+                                onClick={() => { setPhase('read'); resetTranscript(); setRejectionNotice(null); }}
                                 style={{ ...btn(false, '#3b82f6'), flex: 1, width: 'auto' }}
                             >
                                 🔁 Read Again
