@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, speaking, knowledge, dashboard, tracker, cv, roadmap
+from app.routers import auth, speaking, knowledge, dashboard, tracker, cv, roadmap, market
 from app.database import connect_db, disconnect_db, get_db
 from datetime import datetime
 
@@ -33,6 +33,8 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"]
 app.include_router(tracker.router, prefix="/api/tracker", tags=["Tracker"])
 app.include_router(cv.router, prefix="/api/cv", tags=["CV Maker"])
 app.include_router(roadmap.router, prefix="/api/roadmap", tags=["Skill Roadmap"])
+app.include_router(market.router, prefix="/api/market", tags=["Job Market"])
+app.include_router(market.router, prefix="/api/java/market", tags=["Job Market (Java Compat)"])
 
 
 

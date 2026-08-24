@@ -592,7 +592,6 @@ export default function ReadingEngine() {
                                             key={cat.id}
                                             onClick={() => {
                                                 setTopic(cat.title);
-                                                handleGetParagraph(cat.title);
                                             }}
                                             style={{
                                                 padding: '14px 16px',

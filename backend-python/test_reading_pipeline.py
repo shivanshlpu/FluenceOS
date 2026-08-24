@@ -254,6 +254,22 @@ class TestReadingAudioPipelineAndScoring(unittest.TestCase):
         self.assertNotEqual(scores["accuracyScore"], scores["fluencyScore"])
         print(f"[TEST DISTINCT SCORES PASS] Acc={scores['accuracyScore']}, Vocab={scores['vocabularyScore']}, Fluency={scores['fluencyScore']}, Pace={scores['paceScore']}")
 
+    # -------------------------------------------------------------------------
+    # Job Market Analyzer endpoint verification
+    # -------------------------------------------------------------------------
+    def test_market_analyzer_endpoint(self):
+        """Verify market analyzer returns structured hiring intelligence and salary ranges."""
+        import asyncio
+        from app.routers.market import analyze_market_role
+
+        res = asyncio.run(analyze_market_role("ML Engineer"))
+        self.assertEqual(res["role"], "ML Engineer")
+        self.assertIn("salaryRange", res)
+        self.assertIn("topSkills", res)
+        self.assertGreater(len(res["topSkills"]), 3)
+        self.assertGreater(res["salaryRange"]["max"], res["salaryRange"]["min"])
+        print(f"[TEST MARKET PASS] ML Engineer: Salary=${res['salaryRange']['min']}-${res['salaryRange']['max']}, TopSkill={res['topSkills'][0]['skill']}")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -21,12 +21,8 @@ export default function RoadmapGenerator() {
     const { roadmap, loading, setRoadmap, setLoading } = useRoadmapStore();
 
     useEffect(() => {
-        // Load presets on mount
+        // Load presets on mount without auto-generating
         roadmapService.getPresets().then(res => setPresets(res)).catch(() => {});
-        // If no roadmap exists yet, auto-generate default Python roadmap for instant rich preview
-        if (!roadmap) {
-            handleGenerateSkill('Python', 'Beginner');
-        }
     }, []);
 
     const handleGenerateSkill = async (targetSkill, targetLevel) => {
@@ -202,13 +198,16 @@ export default function RoadmapGenerator() {
                 {/* Quick Presets Bar */}
                 <div>
                     <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
-                        Popular 1-Click Pathways:
+                        Popular Skill Pathways (Click to Select):
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                         {presets.map((p) => (
                             <button
                                 key={p.skill}
-                                onClick={() => handleGenerateSkill(p.skill, p.level || 'Beginner')}
+                                onClick={() => {
+                                    setSkill(p.skill);
+                                    if (p.level) setLevel(p.level);
+                                }}
                                 style={{
                                     padding: '7px 14px',
                                     borderRadius: '20px',
@@ -408,6 +407,25 @@ export default function RoadmapGenerator() {
                             </motion.div>
                         )}
                     </AnimatePresence>
+                </div>
+            )}
+
+            {/* Empty state when no roadmap generated yet */}
+            {!roadmap && !loading && !error && (
+                <div style={{
+                    background: 'var(--bg-elevated-1)',
+                    borderRadius: '16px',
+                    padding: '40px 24px',
+                    textAlign: 'center',
+                    border: '1px dashed rgba(255, 255, 255, 0.12)',
+                }}>
+                    <div style={{ fontSize: '42px', marginBottom: '12px' }}>🗺️</div>
+                    <h4 style={{ fontSize: '18px', fontWeight: 800, color: '#fff', marginBottom: '8px' }}>
+                        Ready to Build Your Personalized Learning Pathway
+                    </h4>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '13.5px', maxWidth: '520px', margin: '0 auto', lineHeight: 1.6 }}>
+                        Select a popular pathway above or type any language, framework, or skill, then click <strong style={{ color: '#34d399' }}>Generate Roadmap</strong> to synthesize a step-by-step master plan with projects and interview prep.
+                    </p>
                 </div>
             )}
         </div>
