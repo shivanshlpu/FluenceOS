@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { pythonAPI } from '../services/api';
 import { AudioPipeline, AUDIO_CONFIG } from '../services/audioPipeline';
 
@@ -22,8 +22,9 @@ export const RECORDING_STATES = {
 };
 
 /**
- * Enterprise Audio-Processing & Speech Recognition Hook
+ * Enterprise Audio-Processing & Speech Recognition Hook (ChatGPT Voice & Gemini Live Style)
  * 
+ * - Real-time Live Word Streaming: Everything spoken immediately streams into liveTranscript character-by-character
  * - Hybrid Architecture: Concurrently captures live audio buffer via MediaRecorder while running Web Speech API
  * - Automatic Whisper AI / Gemini fallback transcription if Web Speech is silent or unsupported
  * - Continuous VAD Auto-Transcription: When user speaks into earphones/mic, automatically transcribes and writes down answers
@@ -31,7 +32,6 @@ export const RECORDING_STATES = {
  * - High-pass 80Hz BiquadFilter to cancel air-conditioner and fan rumble
  * - Real-time Web Audio VAD with dynamic noise-floor tracking and hysteresis
  * - Real spectrum analyzer data for accurate UI sound-wave visualization
- * - Clean device-change handling for Bluetooth & USB headsets
  */
 export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage = 'en-US') => {
     // Transcript State
@@ -89,6 +89,16 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
     useEffect(() => {
         languageRef.current = language;
     }, [language]);
+
+    // Live Combined Real-Time Stream (Everything spoken so far + current speaking clause)
+    const liveTranscript = useMemo(() => {
+        const fullFinal = transcript.trim();
+        const interim = interimTranscript.trim();
+        if (fullFinal && interim) {
+            return `${fullFinal} ${interim}`;
+        }
+        return fullFinal || interim || '';
+    }, [transcript, interimTranscript]);
 
     const updateFullTranscript = useCallback((finalPart = '', interimPart = '') => {
         const base = accumulatedTextRef.current.trim();
@@ -256,7 +266,7 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
 
         try {
             const recognition = new SpeechRecognition();
-            recognition.continuous = !isMobile;
+            recognition.continuous = true;
             recognition.interimResults = true;
             recognition.lang = languageRef.current || 'en-US';
             recognition.maxAlternatives = 3;
@@ -318,7 +328,7 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
                         if (isMountedRef.current && isListeningRef.current && fullText) {
                             onSilenceDetected(fullText);
                         }
-                    }, 3000);
+                    }, 2400);
                 }
             };
 
@@ -360,7 +370,7 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
                                 isStartingRef.current = false;
                             }
                         }
-                    }, isMobile ? 120 : 80);
+                    }, isMobile ? 120 : 60);
                 } else {
                     setIsListening(false);
                     setInterimTranscript('');
@@ -516,9 +526,10 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
     }, [cleanupRecognition]);
 
     return {
-        // Text & Confidence
+        // Text & Live Streaming
         transcript,
         interimTranscript,
+        liveTranscript,
         confidence,
         confidenceHistory,
         // State Machine

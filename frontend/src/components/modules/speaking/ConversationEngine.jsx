@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Volume2, VolumeX, RefreshCw, Sparkles, Send, Award, CheckCircle2, AlertCircle, Play, Square, MessageSquare, Mic, MicOff, RotateCcw, Bot, User, Check, Lightbulb, Settings2, Cpu, Activity, Headphones, X, ChevronRight, FileText } from 'lucide-react';
+import { Volume2, VolumeX, RefreshCw, Sparkles, Send, Award, CheckCircle2, AlertCircle, Play, Square, MessageSquare, Mic, MicOff, RotateCcw, Bot, User, Check, Lightbulb, Settings2, Cpu, Activity, Headphones, X, ChevronRight, FileText, Radio, Zap } from 'lucide-react';
 import { useSpeechRecognition } from '../../../hooks/useSpeechRecognition';
 import { speakAIResponse, stopAllSpeech, getVoiceSettings, testAudioPlayback } from '../../../services/voiceService';
 import VoiceSettingsModal from './VoiceSettingsModal';
@@ -46,9 +46,10 @@ export default function ConversationEngine() {
     const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('preferred_ai_model') || 'auto');
     const [messages, setMessages] = useState([]);
     const [isSpeakingAI, setIsSpeakingAI] = useState(false);
-    const [textInput, setTextInput] = useState('');
+    const [messageInput, setMessageInput] = useState('');
     const [loadingAI, setLoadingAI] = useState(false);
     const [autoSpeak, setAutoSpeak] = useState(true);
+    const [liveHandsFreeMode, setLiveHandsFreeMode] = useState(false); // ChatGPT / Gemini Live style auto-turn
     const [hasStarted, setHasStarted] = useState(false);
     const [stats, setStats] = useState({ wpm: 0, fillerCount: 0, totalWords: 0 });
     const [showVoiceModal, setShowVoiceModal] = useState(false);
@@ -63,10 +64,21 @@ export default function ConversationEngine() {
     const messagesEndRef = useRef(null);
     const speechStartTimeRef = useRef(null);
     const isMountedRef = useRef(true);
+    const handleSendMessageRef = useRef(null);
+
+    // Handle auto-submission in Live Hands-Free mode when silence is detected
+    const handleSilenceAutoSubmit = useCallback((spokenText) => {
+        if (liveHandsFreeMode && spokenText && spokenText.trim().length > 3 && !loadingAI && !isSpeakingAI) {
+            if (handleSendMessageRef.current) {
+                handleSendMessageRef.current(spokenText);
+            }
+        }
+    }, [liveHandsFreeMode, loadingAI, isSpeakingAI]);
 
     const {
         transcript,
         interimTranscript,
+        liveTranscript,
         isListening,
         startListening,
         stopListening,
@@ -76,7 +88,14 @@ export default function ConversationEngine() {
         isTranscribingAudio,
         refineWithWhisper,
         error: micError,
-    } = useSpeechRecognition();
+    } = useSpeechRecognition(handleSilenceAutoSubmit);
+
+    // Sync speech live transcript directly into the message box in real-time!
+    useEffect(() => {
+        if (isListening && liveTranscript) {
+            setMessageInput(liveTranscript);
+        }
+    }, [isListening, liveTranscript]);
 
     // Clean unmount
     useEffect(() => {
@@ -90,11 +109,11 @@ export default function ConversationEngine() {
     // Scroll to bottom on new message or live transcript
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, transcript, interimTranscript, loadingAI, isTranscribingAudio]);
+    }, [messages, messageInput, loadingAI, isTranscribingAudio]);
 
     // Live Stats calculation
     useEffect(() => {
-        const currentSpoken = (transcript + ' ' + interimTranscript).trim();
+        const currentSpoken = messageInput.trim();
         if (currentSpoken && speechStartTimeRef.current && isListening) {
             const elapsedMin = (Date.now() - speechStartTimeRef.current) / 60000;
             const words = currentSpoken.split(/\s+/).filter(Boolean);
@@ -110,7 +129,7 @@ export default function ConversationEngine() {
 
             setStats({ wpm, fillerCount: fillers, totalWords: words.length });
         }
-    }, [transcript, interimTranscript, isListening]);
+    }, [messageInput, isListening]);
 
     // Master Speak Function with safe switch to mic
     const playAI = useCallback((text, onFinish = null) => {
@@ -149,6 +168,7 @@ export default function ConversationEngine() {
         stopSpeakingAI();
         stopListening();
         resetTranscript();
+        setMessageInput('');
         setSelectedScenario(scenario);
 
         const firstMsg = {
@@ -211,7 +231,7 @@ export default function ConversationEngine() {
 
         setHasStarted(false);
         resetTranscript();
-        setTextInput('');
+        setMessageInput('');
     };
 
     const handleCloseSummary = () => {
@@ -225,6 +245,7 @@ export default function ConversationEngine() {
         if (refineWithWhisper) {
             const transcribed = await refineWithWhisper();
             if (transcribed) {
+                setMessageInput(transcribed);
                 setTranscript(transcribed);
             }
         }
@@ -232,7 +253,7 @@ export default function ConversationEngine() {
 
     // Send Turn to AI with Dynamic Context-Aware Probing
     const handleSendMessage = async (explicitText = null) => {
-        let text = (explicitText || transcript || textInput).trim();
+        let text = (explicitText || messageInput || liveTranscript).trim();
 
         // If user is listening or audio was recorded and text is empty, auto-transcribe with Whisper
         if (!text && isListening) {
@@ -259,7 +280,7 @@ export default function ConversationEngine() {
         const updatedHistory = [...messages, newUserMessage];
         setMessages(updatedHistory);
         resetTranscript();
-        setTextInput('');
+        setMessageInput('');
         setLoadingAI(true);
 
         try {
@@ -311,6 +332,8 @@ export default function ConversationEngine() {
         }
     };
 
+    handleSendMessageRef.current = handleSendMessage;
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', boxSizing: 'border-box' }}>
             {/* Scenario Header */}
@@ -340,6 +363,28 @@ export default function ConversationEngine() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    {/* Gemini / ChatGPT Live Mode Toggle */}
+                    <button
+                        onClick={() => setLiveHandsFreeMode(!liveHandsFreeMode)}
+                        title={liveHandsFreeMode ? 'Gemini Live Hands-Free Mode Active (Auto-Submits when you stop talking)' : 'Manual Mode (Click Answer or press Enter)'}
+                        style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            background: liveHandsFreeMode ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(168, 85, 247, 0.25))' : 'rgba(255, 255, 255, 0.05)',
+                            border: liveHandsFreeMode ? '1.5px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.12)',
+                            color: liveHandsFreeMode ? '#fca5a5' : 'var(--text-secondary)',
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                        }}
+                    >
+                        <Zap size={14} color={liveHandsFreeMode ? '#ef4444' : 'var(--text-muted)'} className={liveHandsFreeMode ? 'animate-pulse' : ''} />
+                        <span>{liveHandsFreeMode ? '⚡ Gemini Live ON' : '⚡ Gemini Live OFF'}</span>
+                    </button>
+
                     {/* Audio / Earphone Test Button */}
                     <button
                         onClick={handleTestAudio}
@@ -359,7 +404,7 @@ export default function ConversationEngine() {
                         }}
                     >
                         <Headphones size={15} color={isTestingAudio ? '#4ade80' : 'var(--accent, #1ed760)'} />
-                        <span>{isTestingAudio ? '🔊 Playing Audio...' : '🔊 Test Earphones'}</span>
+                        <span>{isTestingAudio ? '🔊 Playing...' : '🔊 Test Earphones'}</span>
                     </button>
 
                     <div style={{ minWidth: '150px', flex: '1 1 auto' }}>
@@ -528,7 +573,7 @@ export default function ConversationEngine() {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#f87171', fontWeight: 800, fontSize: '13px' }}>
                                         <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ef4444', display: 'inline-block', boxShadow: '0 0 8px #ef4444' }} />
-                                        <span>Mic Active (Speak your answer)</span>
+                                        <span>Mic Active (Speak — words will type live below)</span>
                                     </div>
 
                                     {/* Live Soundwave Equalizer Bars */}
@@ -704,25 +749,6 @@ export default function ConversationEngine() {
                             );
                         })}
 
-                        {/* Live Transcribing Bubble */}
-                        {(transcript || interimTranscript) && (
-                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                <div style={{
-                                    padding: '10px 16px',
-                                    borderRadius: '14px',
-                                    background: 'rgba(239, 68, 68, 0.12)',
-                                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                                    color: '#fff',
-                                    fontSize: '13.5px',
-                                    maxWidth: '88%',
-                                }}>
-                                    <span>{transcript} </span>
-                                    <span style={{ color: '#fca5a5', fontStyle: 'italic' }}>{interimTranscript}</span>
-                                    <span> 🎙️</span>
-                                </div>
-                            </div>
-                        )}
-
                         {/* AI Transcribing with Whisper Indicator */}
                         {isTranscribingAudio && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#34d399', fontSize: '13px', fontStyle: 'italic' }}>
@@ -742,7 +768,7 @@ export default function ConversationEngine() {
                         <div ref={messagesEndRef} />
                     </div>
 
-                    {/* Microphone & Input Controller */}
+                    {/* Microphone & Real-Time Streaming Input Controller */}
                     <div style={{
                         padding: '14px 16px',
                         borderRadius: '16px',
@@ -774,18 +800,18 @@ export default function ConversationEngine() {
                                     flexShrink: 0,
                                     transition: 'all 0.2s ease',
                                 }}
-                                title={isListening ? 'Pause Microphone' : 'Click to Speak'}
+                                title={isListening ? 'Pause Microphone' : 'Click to Speak (Words type live into box)'}
                             >
                                 {isListening ? <Mic size={22} className="animate-pulse" /> : <MicOff size={22} />}
                             </button>
 
-                            {/* Manual Text / Edit Field */}
+                            {/* Real-time Streaming Input Box */}
                             <input
-                                placeholder={isListening ? "Listening continuously... (Speak into earphones or type here)" : "Type your answer here..."}
-                                value={transcript || textInput}
+                                placeholder={isListening ? "Listening... (Keep talking, your words are typing live here)" : "Type or speak your answer here..."}
+                                value={messageInput}
                                 onChange={e => {
-                                    setTextInput(e.target.value);
-                                    if (transcript) setTranscript(e.target.value);
+                                    setMessageInput(e.target.value);
+                                    setTranscript(e.target.value);
                                 }}
                                 onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
                                 style={{
@@ -794,7 +820,7 @@ export default function ConversationEngine() {
                                     padding: '12px 16px',
                                     borderRadius: '12px',
                                     background: '#121212',
-                                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                                    border: isListening ? '1.5px solid rgba(34, 197, 94, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
                                     color: '#fff',
                                     fontSize: '14px',
                                     outline: 'none',
@@ -805,16 +831,16 @@ export default function ConversationEngine() {
                             {/* Send Button */}
                             <button
                                 onClick={() => handleSendMessage()}
-                                disabled={(!transcript && !textInput && !isListening) || loadingAI || isTranscribingAudio}
+                                disabled={(!messageInput && !isListening) || loadingAI || isTranscribingAudio}
                                 style={{
                                     padding: '12px 18px',
                                     borderRadius: '12px',
-                                    background: (!transcript && !textInput && !isListening) || loadingAI || isTranscribingAudio ? 'rgba(255,255,255,0.06)' : '#10b981',
+                                    background: (!messageInput && !isListening) || loadingAI || isTranscribingAudio ? 'rgba(255,255,255,0.06)' : '#10b981',
                                     border: 'none',
-                                    color: (!transcript && !textInput && !isListening) || loadingAI || isTranscribingAudio ? 'var(--text-muted)' : '#000',
+                                    color: (!messageInput && !isListening) || loadingAI || isTranscribingAudio ? 'var(--text-muted)' : '#000',
                                     fontSize: '13px',
                                     fontWeight: 800,
-                                    cursor: (!transcript && !textInput && !isListening) || loadingAI || isTranscribingAudio ? 'not-allowed' : 'pointer',
+                                    cursor: (!messageInput && !isListening) || loadingAI || isTranscribingAudio ? 'not-allowed' : 'pointer',
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '6px',
@@ -827,10 +853,16 @@ export default function ConversationEngine() {
                             </button>
                         </div>
 
-                        {/* Helper tip for Earphone & Whisper Fallback */}
-                        {isListening && !transcript && (
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11.5px', color: 'var(--text-muted)', padding: '0 4px', flexWrap: 'wrap', gap: '6px' }}>
-                                <span>💡 Speaking into earphones: words will auto-write as you speak. If quiet, clicking <strong>Answer</strong> transcribes instantly.</span>
+                        {/* Helper tip for Real-time Streaming & Earphone Whisper Fallback */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11.5px', color: 'var(--text-muted)', padding: '0 4px', flexWrap: 'wrap', gap: '6px' }}>
+                            <span>
+                                {liveHandsFreeMode ? (
+                                    <strong style={{ color: '#f87171' }}>⚡ Gemini Live Active: Speak freely. It auto-types and sends when you finish talking.</strong>
+                                ) : (
+                                    <span>💡 Keep speaking into your earphones. Everything types live above. Click <strong>Answer</strong> or press Enter to submit.</span>
+                                )}
+                            </span>
+                            {isListening && (
                                 <button
                                     onClick={handleManualWhisperTranscribe}
                                     disabled={isTranscribingAudio}
@@ -847,8 +879,8 @@ export default function ConversationEngine() {
                                 >
                                     Force Transcribe
                                 </button>
-                            </div>
-                        )}
+                            )}
+                        </div>
                     </div>
                 </div>
             )}
