@@ -113,10 +113,18 @@ export class AudioPipeline {
             if (mediaStream) {
                 this.mediaStream = mediaStream;
             } else {
-                this.mediaStream = await navigator.mediaDevices.getUserMedia({
-                    audio: this.config.constraints,
-                    video: false
-                });
+                try {
+                    this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                        audio: this.config.constraints,
+                        video: false
+                    });
+                } catch (constraintErr) {
+                    console.warn('[AUDIO-PIPELINE] Advanced audio constraints unsupported, falling back to basic audio stream:', constraintErr);
+                    this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                        audio: true,
+                        video: false
+                    });
+                }
             }
 
             // Listen for device changes (Bluetooth headset connection/disconnection)

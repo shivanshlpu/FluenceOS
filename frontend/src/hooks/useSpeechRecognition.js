@@ -24,15 +24,16 @@ export const RECORDING_STATES = {
 /**
  * Enterprise Audio-Processing & Speech Recognition Hook
  * 
+ * - Hybrid Architecture: Concurrently captures live audio buffer via MediaRecorder while running Web Speech API
+ * - Automatic Whisper AI / Gemini fallback transcription if Web Speech is silent or unsupported
+ * - Continuous VAD Auto-Transcription: When user speaks into earphones/mic, automatically transcribes and writes down answers
  * - WebRTC Audio Constraints with Echo Cancellation, Noise Suppression, and AGC
  * - High-pass 80Hz BiquadFilter to cancel air-conditioner and fan rumble
  * - Real-time Web Audio VAD with dynamic noise-floor tracking and hysteresis
  * - Real spectrum analyzer data for accurate UI sound-wave visualization
- * - Confidence-score aggregation across recognition alternatives
- * - Audio Quality Detection & Pre-scoring Gating (detects noise, low volume, clipping, no speech)
  * - Clean device-change handling for Bluetooth & USB headsets
  */
-export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage = 'en-IN') => {
+export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage = 'en-US') => {
     // Transcript State
     const [transcript, setTranscript] = useState('');
     const [interimTranscript, setInterimTranscript] = useState('');
@@ -45,7 +46,7 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
     const [language, setLanguage] = useState(initialLanguage);
     const [error, setError] = useState(null);
     const [isTranscribingAudio, setIsTranscribingAudio] = useState(false);
-    const [recognitionMode, setRecognitionMode] = useState('live'); // 'live' | 'whisper'
+    const [recognitionMode, setRecognitionMode] = useState('hybrid'); // 'hybrid' | 'live' | 'whisper'
 
     // Real-Time Audio Metrics (powered by AudioPipeline AnalyserNode)
     const [audioMetrics, setAudioMetrics] = useState({
@@ -79,7 +80,9 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
     const lastInterimRef = useRef('');
     const restartTimerRef = useRef(null);
     const silenceTimerRef = useRef(null);
+    const autoTranscribeTimerRef = useRef(null);
     const confidencesRef = useRef([]);
+    const hadSpeechActivityRef = useRef(false);
 
     const isMobile = typeof navigator !== 'undefined' && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
@@ -147,6 +150,10 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
             clearTimeout(silenceTimerRef.current);
             silenceTimerRef.current = null;
         }
+        if (autoTranscribeTimerRef.current) {
+            clearTimeout(autoTranscribeTimerRef.current);
+            autoTranscribeTimerRef.current = null;
+        }
         if (recognitionRef.current) {
             try {
                 recognitionRef.current.onstart = null;
@@ -175,6 +182,7 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
         lastInterimRef.current = '';
         audioChunksRef.current = [];
         confidencesRef.current = [];
+        hadSpeechActivityRef.current = false;
         setTranscript('');
         setInterimTranscript('');
         setConfidence(1.0);
@@ -183,170 +191,235 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
         setRecordingState(RECORDING_STATES.IDLE);
     }, []);
 
-    // Create Browser Web Speech Recognition instance
-    const createRecognitionInstance = useCallback(() => {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-            setError('Web Speech recognition is not supported in this browser. You can use Whisper AI Mode.');
+    // Direct Whisper AI Audio Transcription
+    const refineWithWhisper = useCallback(async () => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            try {
+                mediaRecorderRef.current.stop();
+            } catch (e) {}
+        }
+
+        // 120ms buffer flush delay
+        await new Promise(r => setTimeout(r, 120));
+
+        if (audioChunksRef.current.length === 0) {
             return null;
         }
 
-        const recognition = new SpeechRecognition();
-        recognition.continuous = !isMobile;
-        recognition.interimResults = true;
-        recognition.lang = languageRef.current || 'en-IN';
-        recognition.maxAlternatives = 3;
-
-        recognition.onstart = () => {
-            if (!isMountedRef.current) return;
-            isStartingRef.current = false;
-            setError(null);
-            setIsListening(true);
-            setRecordingState(RECORDING_STATES.LISTENING);
-        };
-
-        recognition.onresult = (event) => {
-            if (!isMountedRef.current || !isListeningRef.current) return;
-
-            let currentFinal = '';
-            let currentInterim = '';
-            let totalConfidence = 0;
-            let confCount = 0;
-
-            for (let i = event.resultIndex || 0; i < event.results.length; i++) {
-                const res = event.results[i];
-                if (!res || !res[0]) continue;
-                
-                const alt = res[0];
-                const text = alt.transcript;
-                
-                // Track confidence score
-                if (alt.confidence !== undefined && alt.confidence > 0) {
-                    totalConfidence += alt.confidence;
-                    confCount++;
-                    confidencesRef.current.push(alt.confidence);
-                }
-
-                if (res.isFinal) {
-                    currentFinal += (currentFinal ? ' ' : '') + text.trim();
-                } else {
-                    currentInterim += (currentInterim ? ' ' : '') + text.trim();
-                }
+        setIsTranscribingAudio(true);
+        try {
+            const mimeType = audioChunksRef.current[0]?.type || 'audio/webm';
+            const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+            
+            if (audioBlob.size < 400) {
+                setIsTranscribingAudio(false);
+                return null;
             }
 
-            if (confCount > 0) {
-                const avgConf = Math.round((totalConfidence / confCount) * 100) / 100;
-                setConfidence(avgConf);
-                setConfidenceHistory([...confidencesRef.current]);
-            }
+            const formData = new FormData();
+            const filename = mimeType.includes('mp4') ? 'speech_recording.mp4' : 'speech_recording.webm';
+            formData.append('file', audioBlob, filename);
 
-            if (isMobile && !currentFinal && currentInterim) {
+            const res = await pythonAPI.post('/api/speaking/transcribe', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+                timeout: 25000,
+            });
+
+            if (res && res.transcript) {
+                const whisperText = res.transcript.trim();
+                if (whisperText) {
+                    accumulatedTextRef.current = whisperText;
+                    setTranscript(whisperText);
+                    setInterimTranscript('');
+                    if (res.confidence) {
+                        setConfidence(res.confidence);
+                    }
+                    return whisperText;
+                }
+            }
+        } catch (err) {
+            console.warn('[WHISPER] AI transcription error:', err);
+        } finally {
+            if (isMountedRef.current) {
+                setIsTranscribingAudio(false);
+            }
+        }
+        return null;
+    }, []);
+
+    // Create Browser Web Speech Recognition instance
+    const createRecognitionInstance = useCallback(() => {
+        const SpeechRecognition = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+        if (!SpeechRecognition) {
+            return null;
+        }
+
+        try {
+            const recognition = new SpeechRecognition();
+            recognition.continuous = !isMobile;
+            recognition.interimResults = true;
+            recognition.lang = languageRef.current || 'en-US';
+            recognition.maxAlternatives = 3;
+
+            recognition.onstart = () => {
+                if (!isMountedRef.current) return;
+                isStartingRef.current = false;
+                setError(null);
+                setIsListening(true);
+                setRecordingState(RECORDING_STATES.LISTENING);
+            };
+
+            recognition.onresult = (event) => {
+                if (!isMountedRef.current || !isListeningRef.current) return;
+
+                let currentFinal = '';
+                let currentInterim = '';
+                let totalConfidence = 0;
+                let confCount = 0;
+
+                for (let i = event.resultIndex || 0; i < event.results.length; i++) {
+                    const res = event.results[i];
+                    if (!res || !res[0]) continue;
+                    
+                    const alt = res[0];
+                    const text = alt.transcript;
+                    
+                    if (alt.confidence !== undefined && alt.confidence > 0) {
+                        totalConfidence += alt.confidence;
+                        confCount++;
+                        confidencesRef.current.push(alt.confidence);
+                    }
+
+                    if (res.isFinal) {
+                        currentFinal += (currentFinal ? ' ' : '') + text.trim();
+                    } else {
+                        currentInterim += (currentInterim ? ' ' : '') + text.trim();
+                    }
+                }
+
+                if (confCount > 0) {
+                    const avgConf = Math.round((totalConfidence / confCount) * 100) / 100;
+                    setConfidence(avgConf);
+                    setConfidenceHistory([...confidencesRef.current]);
+                }
+
+                if (currentFinal) {
+                    sessionFinalTextRef.current = (sessionFinalTextRef.current ? `${sessionFinalTextRef.current} ` : '') + currentFinal;
+                }
                 lastInterimRef.current = currentInterim;
-            }
 
-            if (currentFinal) {
-                sessionFinalTextRef.current = (sessionFinalTextRef.current ? `${sessionFinalTextRef.current} ` : '') + currentFinal;
-            }
-            lastInterimRef.current = currentInterim;
+                updateFullTranscript(sessionFinalTextRef.current, currentInterim);
+                setRecordingState(RECORDING_STATES.RECORDING);
 
-            updateFullTranscript(sessionFinalTextRef.current, currentInterim);
-            setRecordingState(RECORDING_STATES.RECORDING);
-
-            if (onSilenceDetected) {
-                if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-                silenceTimerRef.current = setTimeout(() => {
-                    const fullText = (accumulatedTextRef.current + ' ' + (sessionFinalTextRef.current || currentInterim)).trim();
-                    if (isMountedRef.current && isListeningRef.current && fullText) {
-                        onSilenceDetected(fullText);
-                    }
-                }, 3500);
-            }
-        };
-
-        recognition.onerror = (e) => {
-            if (!isMountedRef.current) return;
-            if (e.error === 'no-speech' || e.error === 'aborted') {
-                return; // Normal pause in speech
-            }
-
-            console.warn('[SPEECH] Recognition error:', e.error);
-
-            if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-                isListeningRef.current = false;
-                setIsListening(false);
-                setRecordingState(RECORDING_STATES.ERROR);
-                setError('Microphone permission denied. Please allow microphone access in your browser settings.');
-                cleanupRecognition();
-            }
-        };
-
-        recognition.onend = () => {
-            if (!isMountedRef.current) return;
-
-            // Auto-commit spoken words
-            const pendingText = (sessionFinalTextRef.current || lastInterimRef.current).trim();
-            if (pendingText) {
-                accumulatedTextRef.current = (accumulatedTextRef.current + (accumulatedTextRef.current ? ' ' : '') + pendingText).trim();
-                sessionFinalTextRef.current = '';
-                lastInterimRef.current = '';
-                setTranscript(accumulatedTextRef.current);
-                setInterimTranscript('');
-            }
-
-            // Keep listening continuously if user has not clicked stop
-            if (isListeningRef.current) {
-                if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-                restartTimerRef.current = setTimeout(() => {
-                    if (isMountedRef.current && isListeningRef.current && !isStartingRef.current) {
-                        try {
-                            isStartingRef.current = true;
-                            const newRec = createRecognitionInstance();
-                            if (newRec) {
-                                recognitionRef.current = newRec;
-                                newRec.start();
-                            }
-                        } catch (err) {
-                            isStartingRef.current = false;
-                            console.warn('[SPEECH] Restart recovery:', err);
+                if (onSilenceDetected) {
+                    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+                    silenceTimerRef.current = setTimeout(() => {
+                        const fullText = (accumulatedTextRef.current + ' ' + (sessionFinalTextRef.current || currentInterim)).trim();
+                        if (isMountedRef.current && isListeningRef.current && fullText) {
+                            onSilenceDetected(fullText);
                         }
-                    }
-                }, isMobile ? 120 : 80);
-            } else {
-                setIsListening(false);
-                setInterimTranscript('');
-            }
-        };
+                    }, 3000);
+                }
+            };
 
-        return recognition;
-    }, [cleanupRecognition, isMobile, onSilenceDetected, updateFullTranscript]);
+            recognition.onerror = (e) => {
+                if (!isMountedRef.current) return;
+                if (e.error === 'no-speech' || e.error === 'aborted') {
+                    return;
+                }
+
+                if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+                    setError('Microphone permission denied. Please allow microphone access in your browser settings.');
+                }
+            };
+
+            recognition.onend = () => {
+                if (!isMountedRef.current) return;
+
+                const pendingText = (sessionFinalTextRef.current || lastInterimRef.current).trim();
+                if (pendingText) {
+                    accumulatedTextRef.current = (accumulatedTextRef.current + (accumulatedTextRef.current ? ' ' : '') + pendingText).trim();
+                    sessionFinalTextRef.current = '';
+                    lastInterimRef.current = '';
+                    setTranscript(accumulatedTextRef.current);
+                    setInterimTranscript('');
+                }
+
+                if (isListeningRef.current) {
+                    if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+                    restartTimerRef.current = setTimeout(() => {
+                        if (isMountedRef.current && isListeningRef.current && !isStartingRef.current) {
+                            try {
+                                isStartingRef.current = true;
+                                const newRec = createRecognitionInstance();
+                                if (newRec) {
+                                    recognitionRef.current = newRec;
+                                    newRec.start();
+                                }
+                            } catch (err) {
+                                isStartingRef.current = false;
+                            }
+                        }
+                    }, isMobile ? 120 : 80);
+                } else {
+                    setIsListening(false);
+                    setInterimTranscript('');
+                }
+            };
+
+            return recognition;
+        } catch (err) {
+            console.warn('[SPEECH] SpeechRecognition creation error:', err);
+            return null;
+        }
+    }, [isMobile, onSilenceDetected, updateFullTranscript]);
 
     /**
-     * Start Live Web Speech with full Web Audio Pipeline & VAD
+     * Start Live Web Speech with simultaneous MediaRecorder audio buffering & Web Audio VAD
      */
     const startListening = useCallback(async () => {
         setError(null);
         setQualityReport(null);
+        audioChunksRef.current = [];
+        hadSpeechActivityRef.current = false;
         isListeningRef.current = true;
         setIsListening(true);
         isStartingRef.current = true;
         setRecordingState(RECORDING_STATES.INITIALIZING);
 
         try {
-            // 1. Initialize Web Audio Pipeline with WebRTC Noise Suppression & 80Hz rumble filter
+            // 1. Initialize Web Audio Pipeline
             const pipeline = new AudioPipeline(AUDIO_CONFIG);
             audioPipelineRef.current = pipeline;
 
             pipeline.onAudioMetrics = (metrics) => {
                 if (!isMountedRef.current) return;
                 setAudioMetrics(metrics);
+                if (metrics.isSpeechActive) {
+                    hadSpeechActivityRef.current = true;
+                }
             };
 
             pipeline.onVADChange = (isSpeechActive) => {
                 if (!isMountedRef.current || !isListeningRef.current) return;
                 if (isSpeechActive) {
+                    hadSpeechActivityRef.current = true;
                     setRecordingState(RECORDING_STATES.SPEECH_DETECTED);
+                    if (autoTranscribeTimerRef.current) {
+                        clearTimeout(autoTranscribeTimerRef.current);
+                        autoTranscribeTimerRef.current = null;
+                    }
                 } else {
                     setRecordingState(RECORDING_STATES.PAUSED_IN_SPEECH);
+                    // If user was speaking and Web Speech didn't write anything after 2s of silence, auto-transcribe with Whisper!
+                    if (hadSpeechActivityRef.current && !accumulatedTextRef.current && !sessionFinalTextRef.current) {
+                        if (autoTranscribeTimerRef.current) clearTimeout(autoTranscribeTimerRef.current);
+                        autoTranscribeTimerRef.current = setTimeout(async () => {
+                            if (isMountedRef.current && isListeningRef.current && !accumulatedTextRef.current) {
+                                refineWithWhisper();
+                            }
+                        }, 1800);
+                    }
                 }
             };
 
@@ -355,74 +428,50 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
             };
 
             await pipeline.initialize();
+            mediaStreamRef.current = pipeline.mediaStream;
 
-            // 2. Start Live Web Speech Engine
+            // 2. Concurrently start MediaRecorder for reliable audio buffer capture
+            if (typeof MediaRecorder !== 'undefined' && pipeline.mediaStream) {
+                try {
+                    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                        ? 'audio/webm;codecs=opus'
+                        : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : ''));
+                    
+                    const recorder = mimeType ? new MediaRecorder(pipeline.mediaStream, { mimeType }) : new MediaRecorder(pipeline.mediaStream);
+                    mediaRecorderRef.current = recorder;
+
+                    recorder.ondataavailable = (event) => {
+                        if (event.data && event.data.size > 0) {
+                            audioChunksRef.current.push(event.data);
+                        }
+                    };
+
+                    recorder.start(250);
+                } catch (recErr) {
+                    console.warn('[SPEECH] MediaRecorder start notice:', recErr);
+                }
+            }
+
+            // 3. Start Live Web Speech Engine for real-time subtitling
             const recognition = createRecognitionInstance();
             if (recognition) {
                 recognitionRef.current = recognition;
-                recognition.start();
+                try {
+                    recognition.start();
+                } catch (recStartErr) {
+                    console.warn('[SPEECH] Web Speech recognition.start notice:', recStartErr);
+                }
             }
+            setRecordingState(RECORDING_STATES.LISTENING);
         } catch (e) {
             isStartingRef.current = false;
-            console.warn('[SPEECH] Start error:', e);
-            setError(e.message || 'Could not start audio recording.');
-            setRecordingState(RECORDING_STATES.ERROR);
-        }
-    }, [createRecognitionInstance]);
-
-    /**
-     * Start Whisper AI Direct Recording Mode with Web Audio Analysis & Quality Gating
-     */
-    const startWhisperRecording = useCallback(async () => {
-        setError(null);
-        setQualityReport(null);
-        audioChunksRef.current = [];
-        isListeningRef.current = true;
-        setIsListening(true);
-        setRecordingState(RECORDING_STATES.INITIALIZING);
-
-        try {
-            // 1. Initialize Web Audio Pipeline with constraints
-            const pipeline = new AudioPipeline(AUDIO_CONFIG);
-            audioPipelineRef.current = pipeline;
-
-            pipeline.onAudioMetrics = (metrics) => {
-                if (!isMountedRef.current) return;
-                setAudioMetrics(metrics);
-            };
-
-            pipeline.onVADChange = (isSpeechActive) => {
-                if (!isMountedRef.current || !isListeningRef.current) return;
-                setRecordingState(isSpeechActive ? RECORDING_STATES.SPEECH_DETECTED : RECORDING_STATES.PAUSED_IN_SPEECH);
-            };
-
-            await pipeline.initialize();
-            mediaStreamRef.current = pipeline.mediaStream;
-
-            // 2. Start MediaRecorder
-            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-                ? 'audio/webm;codecs=opus'
-                : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4');
-
-            const recorder = new MediaRecorder(pipeline.mediaStream, { mimeType });
-            mediaRecorderRef.current = recorder;
-
-            recorder.ondataavailable = (event) => {
-                if (event.data && event.data.size > 0) {
-                    audioChunksRef.current.push(event.data);
-                }
-            };
-
-            recorder.start(250);
-            setRecordingState(RECORDING_STATES.LISTENING);
-        } catch (err) {
-            console.error('[WHISPER] Audio record error:', err);
-            setError('Could not access microphone for Whisper recording. Please check permissions.');
-            setRecordingState(RECORDING_STATES.ERROR);
-            setIsListening(false);
             isListeningRef.current = false;
+            setIsListening(false);
+            console.warn('[SPEECH] Start error:', e);
+            setError(e.message || 'Could not access microphone. Please check permissions.');
+            setRecordingState(RECORDING_STATES.ERROR);
         }
-    }, []);
+    }, [createRecognitionInstance, refineWithWhisper]);
 
     /**
      * Stop Listening and evaluate session audio quality
@@ -432,7 +481,11 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
         isStartingRef.current = false;
         setIsListening(false);
 
-        // Commit any remaining words
+        if (autoTranscribeTimerRef.current) {
+            clearTimeout(autoTranscribeTimerRef.current);
+            autoTranscribeTimerRef.current = null;
+        }
+
         const pendingText = (sessionFinalTextRef.current || lastInterimRef.current).trim();
         if (pendingText) {
             accumulatedTextRef.current = (accumulatedTextRef.current + (accumulatedTextRef.current ? ' ' : '') + pendingText).trim();
@@ -442,7 +495,6 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
             setInterimTranscript('');
         }
 
-        // Run session audio quality evaluation
         let report = null;
         if (audioPipelineRef.current) {
             try {
@@ -463,42 +515,6 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
         return report;
     }, [cleanupRecognition]);
 
-    /**
-     * Transcribe with Groq Whisper AI (With verbose confidence & segment analysis)
-     */
-    const refineWithWhisper = useCallback(async () => {
-        if (audioChunksRef.current.length === 0) return null;
-        setIsTranscribingAudio(true);
-        try {
-            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-            const formData = new FormData();
-            formData.append('file', audioBlob, 'speech_recording.webm');
-
-            const res = await pythonAPI.post('/api/speaking/transcribe', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' },
-                timeout: 25000,
-            });
-
-            if (res && res.transcript) {
-                const whisperText = res.transcript.trim();
-                if (whisperText) {
-                    accumulatedTextRef.current = whisperText;
-                    setTranscript(whisperText);
-                    setInterimTranscript('');
-                    if (res.confidence) {
-                        setConfidence(res.confidence);
-                    }
-                    return whisperText;
-                }
-            }
-        } catch (err) {
-            console.warn('[WHISPER] Whisper refinement error:', err);
-        } finally {
-            setIsTranscribingAudio(false);
-        }
-        return null;
-    }, []);
-
     return {
         // Text & Confidence
         transcript,
@@ -518,12 +534,13 @@ export const useSpeechRecognition = (onSilenceDetected = null, initialLanguage =
         // Audio Pipeline Metrics & Quality Report
         audioMetrics,
         qualityReport,
+        hasAudioRecorded: audioChunksRef.current.length > 0,
         // Actions
         startListening,
-        startWhisperRecording,
         stopListening,
         resetTranscript,
         setTranscript,
         refineWithWhisper,
+        transcribeCurrentAudio: refineWithWhisper,
     };
 };

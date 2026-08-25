@@ -6,6 +6,7 @@ from app.services.ai_service import (
     generate_reading_paragraph,
     evaluate_reading,
     chat_speaking_coach,
+    evaluate_interview_session,
     transcribe_audio,
     AVAILABLE_MODELS
 )
@@ -298,6 +299,12 @@ async def evaluate_reading_session(data: ReadingEvalRequest, user=Depends(get_op
 async def voice_chat_turn(data: VoiceChatRequest, user=Depends(get_optional_user)):
     """POST /api/speaking/chat — Real-time 2-way AI voice coach"""
     return await chat_speaking_coach(data.messages, data.scenario, data.difficulty, model=data.model or "auto")
+
+
+@router.post("/interview/summary")
+async def summarize_interview_performance(data: VoiceChatRequest, user=Depends(get_optional_user)):
+    """POST /api/speaking/interview/summary — Full performance analysis, mistake identification & scoring"""
+    return await evaluate_interview_session(data.messages, data.scenario, data.difficulty, model=data.model or "auto")
 
 
 @router.post("/transcribe")
